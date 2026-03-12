@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>契約變更工項擷取工具</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+:root{--bg:#f5f5f0;--card:#fff;--border:#d4d0c8;--pri:#2c5f8a;--red:#c0392b;--txt:#2d2d2d;--mut:#666;--ok:#27ae60}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans TC',sans-serif;background:var(--bg);color:var(--txt);line-height:1.7;min-height:100vh}
+.wrap{max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+header{text-align:center;margin-bottom:2rem;padding-bottom:1rem;border-bottom:2px solid var(--border)}
+header h1{font-size:1.5rem;font-weight:700;color:var(--pri)}
+header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:1.5rem;margin-bottom:1.5rem}
+.ch{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}
+.num{width:26px;height:26px;line-height:26px;border-radius:50%;background:var(--pri);color:#fff;text-align:center;font-size:.8rem;font-weight:700;flex-shrink:0}
+.ch span{font-size:1rem;font-weight:500;color:var(--pri)}
+.fmt{display:flex;gap:.8rem;margin-bottom:1rem}
+.fmt button{flex:1;padding:.7rem;border:2px solid var(--border);border-radius:6px;background:var(--card);cursor:pointer;text-align:center;transition:all .2s;font-family:inherit;font-size:.88rem}
+.fmt button:hover{border-color:var(--pri)}
+.fmt button.on{border-color:var(--pri);background:#eef3f8;font-weight:500}
+.fmt b{display:block;font-weight:500}.fmt small{font-size:.72rem;color:var(--mut)}
+.drop{border:2px dashed var(--border);border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.drop:hover,.drop.over{border-color:var(--pri);background:#f8fafc}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop p{font-size:.88rem;color:var(--mut)}
+.info{display:none;padding:.5rem .8rem;background:#f0f7f0;border-radius:6px;font-size:.82rem;color:var(--ok);margin-top:.8rem}
+.err{display:none;padding:.5rem .8rem;background:#fde8e8;border-radius:6px;font-size:.82rem;color:var(--red);margin-top:.8rem;white-space:pre-wrap}
+#out{display:none}
+.tags{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+.tag{padding:.3rem .7rem;border-radius:4px;font-size:.78rem;font-weight:500}
+.ta{background:#e8f4e8;color:#1a6b1a}.tr{background:#fde8e8;color:#a02020}.tn{background:#e8ecf4;color:#2c5f8a}.td{background:#f4f0e8;color:#7d6608}
+.sec{margin-bottom:1rem;border-radius:6px;overflow:hidden}
+.sh{padding:.5rem .8rem;font-weight:500;font-size:.88rem;display:flex;justify-content:space-between;color:#fff}
+.sha{background:#2e7d32}.shr{background:#c62828}.shn{background:#1565c0}.shd{background:#ef6c00}
+.sb{padding:.6rem .8rem;font-size:.8rem;line-height:1.9;background:var(--card);border:1px solid var(--border);border-top:none;white-space:pre-wrap;word-break:break-all}
+.w{color:var(--red);font-weight:700}
+.tot{padding:.7rem 1rem;background:#2c5f8a;color:#fff;border-radius:6px;font-size:.88rem;font-weight:500;margin-top:.8rem;display:none}
+.acts{display:flex;gap:.6rem;margin-bottom:1rem;flex-wrap:wrap}
+.btn{padding:.5rem 1rem;border:none;border-radius:6px;font-family:inherit;font-size:.82rem;font-weight:500;cursor:pointer;transition:all .2s}
+.bp{background:var(--pri);color:#fff}.bp:hover{background:#1e4568}
+.bo{background:#fff;color:var(--pri);border:1px solid var(--pri)}.bo:hover{background:#f0f4f8}
+.bg{background:var(--ok);color:#fff}.bg:hover{background:#219a52}
+.toast{position:fixed;bottom:2rem;left:50%;transform:translateX(-50%) translateY(80px);padding:.6rem 1.2rem;background:#333;color:#fff;border-radius:6px;font-size:.82rem;opacity:0;transition:all .3s;z-index:100}
+.toast.on{transform:translateX(-50%) translateY(0);opacity:1}
+@media(max-width:600px){.fmt,.acts{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>契約變更工項擷取工具</h1>
+  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字</p>
+</header>
+<div class="card">
+  <div class="ch"><div class="num">1</div><span>選擇格式並上傳 Excel</span></div>
+  <div class="fmt">
+    <button class="on" id="f1" onclick="pickFmt('template')"><b>範本格式</b><small>四個工作表：原追加/原追減/新增/新增不議</small></button>
+    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>預算明細表，含分區標題，自動偵測欄位</small></button>
+  </div>
+  <div class="drop" id="dz">
+    <input type="file" id="fi" accept=".xlsx,.xlsm,.xls" onchange="onFile(event)">
+    <div style="font-size:2rem;margin-bottom:.3rem">📁</div>
+    <p>點擊或拖曳上傳 <strong>Excel 預算書</strong>（.xlsx / .xlsm / .xls）</p>
+  </div>
+  <div class="info" id="info"></div>
+  <div class="err" id="err"></div>
+</div>
+<div id="out">
+  <div class="card">
+    <div class="ch"><div class="num">2</div><span>解析結果預覽</span></div>
+    <div class="tags" id="tags"></div>
+    <div class="acts">
+      <button class="btn bp" onclick="copyAll()">📋 複製全部文字</button>
+      <button class="btn bo" onclick="dlTxt()">📄 下載 TXT</button>
+      <button class="btn bg" onclick="reset()">🔄 重新上傳</button>
+    </div>
+    <div id="blocks"></div>
+    <div class="tot" id="totLine"></div>
+  </div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+// ================================================================
+// 全域
+// ================================================================
+let fmt='template', res=null;
+function pickFmt(f){fmt=f;document.getElementById('f1').classList.toggle('on',f==='template');document.getElementById('f2').classList.toggle('on',f==='estimate')}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2500)}
+function showErr(m){const e=document.getElementById('err');e.textContent=m;e.style.display='block'}
+function reset(){document.getElementById('out').style.display='none';document.getElementById('fi').value='';document.getElementById('info').style.display='none';document.getElementById('err').style.display='none';res=null}
+const dz=document.getElementById('dz');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');if(e.dataTransfer.files.length){document.getElementById('fi').files=e.dataTransfer.files;onFile({target:{files:e.dataTransfer.files}})}});
+
+// ================================================================
+// 數字工具 (對齊 VBA FormatNum)
+// ================================================================
+function N(v){const n=Number(v);return isNaN(n)?0:n}
+function FN(v){
+  if(v==null||isNaN(v))return'0';
+  if(Math.floor(v)===v) return Math.round(v).toLocaleString('en-US');
+  // 保留到小數第二位，去掉尾巴 0
+  let s=v.toFixed(2).replace(/0+$/,'').replace(/\.$/,'');
+  let p=s.split('.');p[0]=Number(p[0]).toLocaleString('en-US');
+  return p.length>1?p[0]+'.'+p[1]:p[0];
+}
+function cleanName(s){return(s||'').replace(/\r\n|\r|\n/g,' ').replace(/ +/g,' ').trim()}
+
+// ================================================================
+// 排除清單 (對齊 VBA IsExcludedRow)
+// ================================================================
+const EXCLUDE_NAMES=['包工費','承商利稅','承商利潤','包商利潤',
+  '職業安全衛生費用','職業安全勞工管理',
+  '品質管理費','品管費','營業稅','新制營業稅',
+  '共計','合計','發包工程費','小計',
+  '不可量化','可量化',
+  '工地清潔費','勞工安全衛生訓練費','職業安全衛生計畫書',
+  '風險評估報告書','鐵路行車安全教育訓練',
+  '臨軌工程施工進場申請','鐵路沿線施工安全檢查',
+  '勞工安全衛生作業及管理','品質管理作業費','品管文件製作費',
+  '品質管理費及材料試驗費','場所及材料堆置之防護措施'];
+
+function isExcludedRow(code,name){
+  for(const ex of EXCLUDE_NAMES) if(name.includes(ex)) return true;
+  const c=code.trim();
+  if(!c) return true;
+  if(c==='0B'||c==='OB'||c==='01') return true;
+  if(c.length<=3 && /^\d+$/.test(c)) return true;
+  return false;
+}
+
+// ================================================================
+// 分區標題判斷 (對齊 VBA IsSectionHeader)
+// ================================================================
+function isSectionHeader(t){
+  t=(t||'').trim();
+  if(!t) return false;
+  if(t.length===1 && '甲乙丙丁一二三四五六七八九十ABCDabcd'.includes(t.toUpperCase())) return true;
+  if(t.length<2) return false;
+  // [甲] [A] 等
+  if(t[0]==='['&&t.length>=3&&'甲乙丙丁一二三四五六七八九十ABCDabcd'.includes(t[1].toUpperCase())&&t[2]===']') return true;
+  // 全形括號
+  if(t.charCodeAt(0)===0xFF08) return true;
+  // 半形( 後接中文
+  if(t[0]==='('&&t.charCodeAt(1)>127) return true;
+  // 甲、A. 等
+  const ch=t[0];
+  if('甲乙丙丁一二三四五六七八九十ABCDEabcde'.includes(ch.toUpperCase())){
+    if(t.length>=2){
+      const c2=t[1];
+      if(c2==='、'||c2==='.'||c2===' '||c2==='\u3001'||c2==='．') return true;
+    }
+  }
+  return false;
+}
+
+// ================================================================
+// MatchSection (對齊 VBA MatchSection v3.1)
+// ================================================================
+function matchSection(text,type){
+  const t=text;
+  switch(type){
+    case '追加':
+      if(t.includes('追加')&&(t.includes('原')||t.includes('乙'))){
+        if(!t.includes('無追加')) return true;
+      }
+      return false;
+    case '追減':
+      if(t.includes('追減')&&(t.includes('原')||t.includes('丙'))){
+        if(!t.includes('無追加減')) return true;
+      }
+      return false;
+    case '新增':
+      if(t.includes('新增')&&(t.includes('丁')||t.includes('項目')||t.includes('（四）')||t.includes('(四)')||t.includes('戊')||t.includes('（五）')||t.includes('(五)'))) return true;
+      // 也比對 D. E. 開頭
+      if(t.includes('新增')) return true;
+      return false;
+  }
+  return false;
+}
+
+// ================================================================
+// 檔案上傳
+// ================================================================
+function onFile(e){
+  const file=e.target.files[0];if(!file)return;
+  document.getElementById('info').style.display='block';
+  document.getElementById('info').textContent='✓ '+file.name;
+  document.getElementById('err').style.display='none';
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'});
+      res=fmt==='template'?parseTemplate(wb):parseEstimate(wb);
+      render();
+    }catch(err){showErr('解析失敗：'+err.message);console.error(err)}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ================================================================
+// 格式 A：範本格式 (對齊 VBA ReadTemplateSheet)
+// ================================================================
+function parseTemplate(wb){
+  const map={add:'原追加',reduce:'原追減',newItems:'新增',noNeg:'新增不議'};
+  const r={add:[],reduce:[],newItems:[],noNeg:[],warn:[]};
+  for(const[k,sn]of Object.entries(map)){
+    const ws=wb.Sheets[sn];
+    if(!ws){if(k!=='noNeg')r.warn.push('找不到工作表「'+sn+'」');continue}
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    for(let i=1;i<rows.length;i++){
+      const row=rows[i];
+      if(String(row[0]||'').trim()===''&&String(row[1]||'').trim()==='') break;
+      const amt=N(row[7]);if(amt===0) continue;
+      const unit=String(row[4]||'').trim();
+      const price=N(row[5]),qty=N(row[6]);
+      let origQty=String(row[3]||'').trim();
+      if(origQty&&origQty!=='0'&&!isNaN(Number(origQty))) origQty=FN(Number(origQty));
+      else if(origQty==='0') origQty='';
+      const item={code:String(row[1]||'').trim(),name:cleanName(String(row[2]||'')),origQty,unit,price,qty,amt};
+      if(unit!=='式'&&price&&qty){
+        const c=Math.round(price*qty*100)/100;
+        if(Math.abs(c-Math.round(amt*100)/100)>0.01)
+          item.warn='【警告：單價'+price+'x數量'+qty+'='+c+'，與原表金額'+Math.round(amt*100)/100+'不符】';
+      }
+      r[k].push(item);
+    }
+  }
+  return r;
+}
+
+// ================================================================
+// 格式 B：概算書格式 (對齊 VBA ReadBudgetSection)
+// ================================================================
+function parseEstimate(wb){
+  const r={add:[],reduce:[],newItems:[],noNeg:[],warn:[]};
+
+  // FindMainSheet
+  let ws=null,wsName='';
+  for(const n of wb.SheetNames){if(n.includes('明細')){ws=wb.Sheets[n];wsName=n;break}}
+  if(!ws)for(const n of wb.SheetNames){if(n.includes('變更')||n.includes('概算')){ws=wb.Sheets[n];wsName=n;break}}
+  if(!ws){ws=wb.Sheets[wb.SheetNames[0]];wsName=wb.SheetNames[0]}
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',range:0});
+
+  // 偵測欄位 (對齊 VBA 邏輯)
+  let cCode=0,cName=1,cUnit=3,cOrigQty=4,cPrice1=5,cPrice2=8,cChgQty=10,cChgAmt=12;
+  let foundChangeCol=0,foundOrigCol=0,foundNewCol=0;
+
+  for(let rH=0;rH<Math.min(10,rows.length);rH++){
+    const row=rows[rH];
+    for(let ch=0;ch<Math.min(20,row.length);ch++){
+      const s=(String(row[ch]||'')).replace(/\s+/g,'').replace(/\n/g,'');
+      if(!s) continue;
+      if(s==='項次'||s==='項目') cCode=ch;
+      if(s==='工程項目'||s==='工項名稱') cName=ch;
+      if(s==='單位') cUnit=ch;
+      if(s.includes('比較增減')||s.includes('依現況結算')) foundChangeCol=ch;
+      if(s.includes('合約')||s.includes('原預算')||s.includes('契約')) foundOrigCol=ch;
+      if(s.includes('變更')&&s.includes('預算')) foundNewCol=ch;
+    }
+  }
+
+  // v3.2: cCode===cName 時，cName=cCode+1
+  if(cCode===cName) cName=cCode+1;
+
+  // 二次掃描找增減欄
+  if(!foundChangeCol){
+    for(let rH=0;rH<Math.min(10,rows.length);rH++){
+      const row=rows[rH];
+      for(let ch=0;ch<Math.min(20,row.length);ch++){
+        const s=(String(row[ch]||'')).replace(/\s+/g,'').replace(/\n/g,'');
+        if(s.includes('增減')||s.includes('追加減')) foundChangeCol=ch;
+      }
+    }
+  }
+
+  // 在大標題群組下找子標題（數量/單價/金額）
+  function findSubCols(startCol){
+    const result={qty:-1,price:-1,amt:-1};
+    for(let ch=startCol;ch<=startCol+3&&ch<20;ch++){
+      for(let rH=0;rH<Math.min(10,rows.length);rH++){
+        const s2=(String(rows[rH][ch]||'')).replace(/\s+/g,'').replace(/\n/g,'');
+        if(s2==='數量'&&result.qty<0) result.qty=ch;
+        if(s2==='單價'&&result.price<0) result.price=ch;
+        if((s2==='金額'||s2==='複價')&&result.amt<0) result.amt=ch;
+      }
+    }
+    return result;
+  }
+
+  if(foundOrigCol){
+    const sub=findSubCols(foundOrigCol);
+    if(sub.qty>=0) cOrigQty=sub.qty;
+    if(sub.price>=0) cPrice1=sub.price;
+  }
+  if(foundNewCol){
+    const sub=findSubCols(foundNewCol);
+    if(sub.price>=0) cPrice2=sub.price;
+  }
+  if(foundChangeCol){
+    const sub=findSubCols(foundChangeCol);
+    if(sub.qty>=0) cChgQty=sub.qty;
+    if(sub.amt>=0) cChgAmt=sub.amt;
+  }
+
+  console.log('欄位偵測:',{cCode,cName,cUnit,cOrigQty,cPrice1,cPrice2,cChgQty,cChgAmt,foundOrigCol,foundNewCol,foundChangeCol});
+
+  // 對三個區段各自讀取 (對齊 VBA ReadBudgetSection 的分段邏輯)
+  function readSection(sectionType){
+    const items=[];
+    const maxRow=rows.length;
+
+    // 找 startRow
+    let startRow=-1;
+    for(let i=0;i<maxRow;i++){
+      const row=rows[i];
+      let cellA=String(row[cCode]||'').trim();
+      let cellB=String(row[cName]||'').trim();
+      if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
+      const combo=cellA+' '+cellB;
+      if(matchSection(combo,sectionType)){
+        if(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo)){
+          startRow=i+1;break;
+        }
+      }
+    }
+    if(startRow<0) return items;
+
+    // 找 endRow
+    let endRow=maxRow-1;
+    for(let i=startRow;i<maxRow;i++){
+      const row=rows[i];
+      let cellA=String(row[cCode]||'').trim();
+      let cellB=String(row[cName]||'').trim();
+      if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
+      const combo=cellA+' '+cellB;
+      if(cellB.includes('合計')||cellB.includes('共計')){endRow=i-1;break}
+      if(i>startRow&&(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo))){endRow=i-1;break}
+    }
+
+    // 讀取資料列
+    for(let i=startRow;i<=endRow;i++){
+      const row=rows[i];
+      const code=String(row[cCode]||'').trim();
+      const name=cleanName(String(row[cName]||''));
+      const unit=String(row[cUnit]||'').trim();
+      const mAmt=row[cChgAmt];
+
+      // IsValidItem 邏輯
+      if(!code&&!name) continue;
+      if(isExcludedRow(code,name)) continue;
+      if(sectionType!=='新增'){
+        if(code.length===4&&unit==='式') continue;
+      }
+      if(mAmt===''||mAmt===null||mAmt===undefined||isNaN(Number(mAmt))) continue;
+      if(Number(mAmt)===0) continue;
+
+      // 讀取欄位值
+      let origQty=String(row[cOrigQty]||'').trim();
+      if(origQty==='0'||origQty==='0.0') origQty='';
+      else if(origQty&&!isNaN(Number(origQty))) origQty=FN(Number(origQty));
+
+      const fVal=N(row[cPrice1]);
+      const iVal=N(row[cPrice2]);
+      let price=0;
+      if(fVal!==0) price=fVal;
+      else if(iVal!==0) price=iVal;
+
+      const qty=N(row[cChgQty]);
+      const amt=N(mAmt);
+
+      const item={code,name,origQty,unit,price,qty,amt};
+
+      // 稽核
+      if(unit!=='式'&&price&&qty){
+        const calc=Math.round(price*qty*100)/100;
+        if(Math.abs(calc-Math.round(amt*100)/100)>0.01)
+          item.warn='【警告：單價'+price+'x數量'+qty+'='+calc+'，與原表金額'+Math.round(amt*100)/100+'不符】';
+      }
+      items.push(item);
+    }
+    return items;
+  }
+
+  r.add=readSection('追加');
+  r.reduce=readSection('追減');
+  r.newItems=readSection('新增');
+  // 概算書格式目前不拆不議價（對齊 VBA: newNoNegCount = 0）
+  r.noNeg=[];
+
+  return r;
+}
+
+// ================================================================
+// 格式化輸出 (對齊 VBA WriteAddItems/WriteReduceItems/WriteNew*)
+// ================================================================
+function fmtSec(type,items){
+  const lines=[];
+  items.forEach((it,i)=>{
+    let l=(i+1)+'、項目：'+it.code+'，工項名稱：'+it.name;
+    if(type==='add'||type==='reduce'){
+      if(it.origQty) l+='，原契約數量'+it.origQty;
+      l+='，單價為'+FN(it.price);
+      if(type==='add') l+='，追加數量'+FN(it.qty)+'，追加金額'+FN(it.amt)+'元。';
+      else l+='，追減數量'+FN(it.qty)+'，追減金額'+FN(it.amt)+'元。';
+    }else{
+      l+='，新增數量'+FN(it.qty)+'，新增單價'+FN(it.price)+'，追加金額'+FN(it.amt)+'元。';
+    }
+    if(it.warn) l+=it.warn;
+    lines.push({t:l,w:!!it.warn});
+  });
+  const tot=items.reduce((s,it)=>s+it.amt,0);
+  lines.push({t:(items.length+1)+'、共計'+(type==='reduce'?'追減':'追加')+FN(tot)+'元。',w:false});
+  return{lines,tot};
+}
+
+// ================================================================
+// 渲染
+// ================================================================
+function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function render(){
+  if(!res)return;
+  const secs=[
+    {k:'add',ty:'add',t:'(一) 原契約工項－追加',c:'a',hc:'sha',d:res.add},
+    {k:'reduce',ty:'reduce',t:'(二) 原契約工項－追減',c:'r',hc:'shr',d:res.reduce},
+    {k:'newItems',ty:'new',t:'(三) 新增項目（須辦理議價）',c:'n',hc:'shn',d:res.newItems},
+    {k:'noNeg',ty:'noNeg',t:'(四) 新增項目（不議價）',c:'d',hc:'shd',d:res.noNeg},
+  ];
+  let tH='',bH='';const tots={};
+  secs.forEach(s=>{
+    const n=s.d.length;
+    const label=s.t.substring(0,s.t.indexOf('）')+1);
+    tH+='<span class="tag t'+s.c+'">'+label+' '+n+' 筆</span>';
+    if(!n){tots[s.k]=0;bH+='<div class="sec"><div class="sh '+s.hc+'">'+s.t+'：</div><div class="sb">無</div></div>';return}
+    const rs=fmtSec(s.ty,s.d);tots[s.k]=rs.tot;
+    let body=rs.lines.map(l=>{let h=esc(l.t);if(l.w)h=h.replace(/【警告：.*?】/g,m=>'<span class="w">'+m+'</span>');return h}).join('\n');
+    bH+='<div class="sec"><div class="sh '+s.hc+'"><span>'+s.t+'：</span><span style="font-size:.75rem;font-weight:400">'+n+' 筆</span></div><div class="sb">'+body+'</div></div>';
+  });
+  document.getElementById('tags').innerHTML=tH;
+  document.getElementById('blocks').innerHTML=bH;
+  // 加總行 (對齊 VBA finalLine 格式)
+  const tl=document.getElementById('totLine');
+  const net=tots.add+tots.reduce+tots.newItems+(tots.noNeg||0);
+  tl.textContent='本次契約變更總計：(一) 原契約工項-追加 '+FN(tots.add)+' 元 + (二) 原契約工項-追減 '+FN(tots.reduce)+' 元 + (三) 新增項目(須議價) '+FN(tots.newItems)+' 元 + (四) 新增項目(不議價) '+FN(tots.noNeg||0)+' 元 = 本次變更淨額 '+FN(net)+' 元。';
+  tl.style.display='block';
+  document.getElementById('out').style.display='block';
+  if(res.warn&&res.warn.length)showErr('注意：'+res.warn.join('；'));
+}
+
+// ================================================================
+// 全文輸出
+// ================================================================
+function fullText(){
+  if(!res)return'';let t='';
+  [{ty:'add',h:'(一) 原契約工項-追加：',d:res.add},
+   {ty:'reduce',h:'(二) 原契約工項-追減：',d:res.reduce},
+   {ty:'new',h:'(三) 新增項目（須辦理議價）：',d:res.newItems}
+  ].forEach(s=>{t+=s.h+'\n';if(!s.d.length){t+='無\n\n';return}t+=fmtSec(s.ty,s.d).lines.map(l=>l.t).join('\n')+'\n\n'});
+  if(res.noNeg.length){t+='(四) 新增項目（不議價）：\n'+fmtSec('noNeg',res.noNeg).lines.map(l=>l.t).join('\n')+'\n\n'}
+  const a=res.add.reduce((s,i)=>s+i.amt,0),b=res.reduce.reduce((s,i)=>s+i.amt,0),c=res.newItems.reduce((s,i)=>s+i.amt,0),d=res.noNeg.reduce((s,i)=>s+i.amt,0);
+  t+='本次契約變更總計：(一) 原契約工項-追加 '+FN(a)+' 元 + (二) 原契約工項-追減 '+FN(b)+' 元 + (三) 新增項目(須議價) '+FN(c)+' 元 + (四) 新增項目(不議價) '+FN(d)+' 元 = 本次變更淨額 '+FN(a+b+c+d)+' 元。';
+  return t;
+}
+function copyAll(){navigator.clipboard.writeText(fullText()).then(()=>toast('已複製到剪貼簿')).catch(()=>{const a=document.createElement('textarea');a.value=fullText();document.body.appendChild(a);a.select();document.execCommand('copy');document.body.removeChild(a);toast('已複製')})}
+function dlTxt(){const b=new Blob(['\uFEFF'+fullText()],{type:'text/plain;charset=utf-8'});const u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download='契約變更工項明細.txt';a.click();URL.revokeObjectURL(u);toast('已下載 TXT')}
+</script>
+</body>
+</html>
