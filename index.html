@@ -131,6 +131,7 @@ function isExcludedRow(code,name){
   const c=code.trim();
   if(!c) return true;
   if(c==='0B'||c==='OB'||c==='01') return true;
+  if(c.startsWith('0A')||c.startsWith('OA')) return true;
   if(c.length<=3 && /^\d+$/.test(c)) return true;
   return false;
 }
@@ -151,7 +152,7 @@ function isSectionHeader(t){
   if(t[0]==='('&&t.charCodeAt(1)>127) return true;
   // 甲、A. 等
   const ch=t[0];
-  if('甲乙丙丁一二三四五六七八九十ABCDEabcde'.includes(ch.toUpperCase())){
+  if('甲乙丙丁一二三四五六七八九十ABCDEabcde0123456789'.includes(ch.toUpperCase())){
     if(t.length>=2){
       const c2=t[1];
       if(c2==='、'||c2==='.'||c2===' '||c2==='\u3001'||c2==='．') return true;
@@ -249,7 +250,7 @@ function parseEstimate(wb){
   const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',range:0});
 
   // 偵測欄位 (對齊 VBA 邏輯)
-  let cCode=0,cName=1,cUnit=3,cOrigQty=4,cPrice1=5,cPrice2=8,cChgQty=10,cChgAmt=12;
+  let cCode=0,cName=1,cUnit=3,cOrigQty=4,cPrice1=5,cPrice2=8,cChgQty=10,cChgAmt=12,cNewAmt=-1,cNewQty=-1;
   let foundChangeCol=0,foundOrigCol=0,foundNewCol=0;
 
   for(let rH=0;rH<Math.min(10,rows.length);rH++){
@@ -301,7 +302,9 @@ function parseEstimate(wb){
   }
   if(foundNewCol){
     const sub=findSubCols(foundNewCol);
+    if(sub.qty>=0) cNewQty=sub.qty;
     if(sub.price>=0) cPrice2=sub.price;
+    if(sub.amt>=0) cNewAmt=sub.amt;
   }
   if(foundChangeCol){
     const sub=findSubCols(foundChangeCol);
@@ -315,75 +318,88 @@ function parseEstimate(wb){
   function readSection(sectionType){
     const items=[];
     const maxRow=rows.length;
+    let i=0;
 
-    // 找 startRow
-    let startRow=-1;
-    for(let i=0;i<maxRow;i++){
-      const row=rows[i];
-      let cellA=String(row[cCode]||'').trim();
-      let cellB=String(row[cName]||'').trim();
-      if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
-      const combo=cellA+' '+cellB;
-      if(matchSection(combo,sectionType)){
-        if(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo)){
-          startRow=i+1;break;
+    while(i<maxRow){
+      // 找 startRow
+      let startRow=-1;
+      let matched=false;
+      for(;i<maxRow;i++){
+        const row=rows[i];
+        let cellA=String(row[cCode]||'').trim();
+        let cellB=String(row[cName]||'').trim();
+        if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
+        const combo=cellA+' '+cellB;
+        if(matchSection(combo,sectionType)){
+          if(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo)){
+            startRow=i+1;matched=true;break;
+          }
         }
       }
-    }
-    if(startRow<0) return items;
+      if(!matched) break;
 
-    // 找 endRow
-    let endRow=maxRow-1;
-    for(let i=startRow;i<maxRow;i++){
-      const row=rows[i];
-      let cellA=String(row[cCode]||'').trim();
-      let cellB=String(row[cName]||'').trim();
-      if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
-      const combo=cellA+' '+cellB;
-      if(cellB.includes('合計')||cellB.includes('共計')){endRow=i-1;break}
-      if(i>startRow&&(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo))){endRow=i-1;break}
-    }
-
-    // 讀取資料列
-    for(let i=startRow;i<=endRow;i++){
-      const row=rows[i];
-      const code=String(row[cCode]||'').trim();
-      const name=cleanName(String(row[cName]||''));
-      const unit=String(row[cUnit]||'').trim();
-      const mAmt=row[cChgAmt];
-
-      // IsValidItem 邏輯
-      if(!code&&!name) continue;
-      if(isExcludedRow(code,name)) continue;
-      if(sectionType!=='新增'){
-        if(code.length===4&&unit==='式') continue;
+      // 找 endRow
+      let endRow=maxRow-1;
+      for(let j=startRow;j<maxRow;j++){
+        const row=rows[j];
+        let cellA=String(row[cCode]||'').trim();
+        let cellB=String(row[cName]||'').trim();
+        if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
+        const combo=cellA+' '+cellB;
+        if(cellB.includes('合計')||cellB.includes('共計')){endRow=j-1;break;}
+        if(j>startRow&&(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo))){
+          endRow=j-1;break;
+        }
       }
-      if(mAmt===''||mAmt===null||mAmt===undefined||isNaN(Number(mAmt))) continue;
-      if(Number(mAmt)===0) continue;
 
-      // 讀取欄位值
-      let origQty=String(row[cOrigQty]||'').trim();
-      if(origQty==='0'||origQty==='0.0') origQty='';
-      else if(origQty&&!isNaN(Number(origQty))) origQty=FN(Number(origQty));
+      // 讀取資料列
+      for(let j=startRow;j<=endRow;j++){
+        const row=rows[j];
+        const code=String(row[cCode]||'').trim();
+        const name=cleanName(String(row[cName]||''));
+        const unit=String(row[cUnit]||'').trim();
+        let mAmt=row[cChgAmt];
+        let qty=N(row[cChgQty]);
 
-      const fVal=N(row[cPrice1]);
-      const iVal=N(row[cPrice2]);
-      let price=0;
-      if(fVal!==0) price=fVal;
-      else if(iVal!==0) price=iVal;
+        // 針對新增項目，如果比較增減欄位沒金額，嘗試改抓變更後預算的金額欄位
+        if((mAmt===''||mAmt===null||mAmt===undefined||Number(mAmt)===0) && sectionType==='新增'){
+          if(cNewAmt>=0) mAmt=row[cNewAmt];
+          if((qty===0 || isNaN(qty)) && cNewQty>=0) qty=N(row[cNewQty]);
+        }
 
-      const qty=N(row[cChgQty]);
-      const amt=N(mAmt);
+        // IsValidItem 邏輯
+        if(!code&&!name) continue;
+        if(isExcludedRow(code,name)) continue;
+        if(sectionType!=='新增'){
+          if(code.length===4&&unit==='式') continue;
+        }
+        if(mAmt===''||mAmt===null||mAmt===undefined||isNaN(Number(mAmt))) continue;
+        if(Number(mAmt)===0) continue;
 
-      const item={code,name,origQty,unit,price,qty,amt};
+        // 讀取欄位值
+        let origQty=String(row[cOrigQty]||'').trim();
+        if(origQty==='0'||origQty==='0.0') origQty='';
+        else if(origQty&&!isNaN(Number(origQty))) origQty=FN(Number(origQty));
 
-      // 稽核
-      if(unit!=='式'&&price&&qty){
-        const calc=Math.round(price*qty*100)/100;
-        if(Math.abs(calc-Math.round(amt*100)/100)>0.01)
-          item.warn='【警告：單價'+price+'x數量'+qty+'='+calc+'，與原表金額'+Math.round(amt*100)/100+'不符】';
+        const fVal=N(row[cPrice1]);
+        const iVal=N(row[cPrice2]);
+        let price=0;
+        if(fVal!==0) price=fVal;
+        else if(iVal!==0) price=iVal;
+
+        const amt=N(mAmt);
+
+        const item={code,name,origQty,unit,price,qty,amt};
+
+        // 稽核
+        if(unit!=='式'&&price&&qty){
+          const calc=Math.round(price*qty*100)/100;
+          if(Math.abs(calc-Math.round(amt*100)/100)>0.01)
+            item.warn='【警告：單價'+price+'x數量'+qty+'='+calc+'，與原表金額'+Math.round(amt*100)/100+'不符】';
+        }
+        items.push(item);
       }
-      items.push(item);
+      i=endRow+1;
     }
     return items;
   }
