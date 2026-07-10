@@ -1,0 +1,36 @@
+# === 這是公開 GitHub repo（AImaster888/change-order）===
+# 以下檔案「絕對不可」進版控，理由見 CLAUDE.md。
+
+# 真實預算書（含機關名稱、標案金額等敏感資料）——只保留 test/ 底下的匿名 fixture
+*.xlsx
+*.xlsm
+*.xls
+!test/fixture.xlsx
+
+# 案件資料一案一夾，整夾機敏不版控（比照 change-budget-verify：
+# 原始預算書與工具產出都放 projects\<案名>\，不上傳）
+projects/
+
+# 備份副本（<原檔名>.bak-<YYYYMMDD>）
+*.bak-*
+
+# 解壓/暫存產物
+temp_excel/
+temp.zip
+temp/
+*.tmp
+
+# 除錯截圖
+error*.jpg
+error*.png
+
+# 相依套件與鎖檔（純前端工具，執行不需 npm install；測試才需要）
+node_modules/
+
+# 機器本機設定（含個人路徑與權限）——整夾不上公開 repo
+.claude/
+
+# 作業系統雜項
+Thumbs.db
+Desktop.ini
+.DS_Store

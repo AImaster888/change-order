@@ -35,7 +35,8 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
 .ta{background:#e8f4e8;color:#1a6b1a}.tr{background:#fde8e8;color:#a02020}.tn{background:#e8ecf4;color:#2c5f8a}.td{background:#f4f0e8;color:#7d6608}
 .sec{margin-bottom:1rem;border-radius:6px;overflow:hidden}
 .sh{padding:.5rem .8rem;font-weight:500;font-size:.88rem;display:flex;justify-content:space-between;color:#fff}
-.sha{background:#2e7d32}.shr{background:#c62828}.shn{background:#1565c0}.shd{background:#ef6c00}
+.sha{background:#2e7d32}.shr{background:#c62828}.shn{background:#1565c0}.shd{background:#ef6c00}.shg{background:#616161}
+.wo{color:#ef6c00;font-weight:600}
 .sb{padding:.6rem .8rem;font-size:.8rem;line-height:1.9;background:var(--card);border:1px solid var(--border);border-top:none;white-space:pre-wrap;word-break:break-all}
 .w{color:var(--red);font-weight:700}
 .tot{padding:.7rem 1rem;background:#2c5f8a;color:#fff;border-radius:6px;font-size:.88rem;font-weight:500;margin-top:.8rem;display:none}
@@ -59,7 +60,7 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
   <div class="ch"><div class="num">1</div><span>選擇格式並上傳 Excel</span></div>
   <div class="fmt">
     <button class="on" id="f1" onclick="pickFmt('template')"><b>範本格式</b><small>四個工作表：原追加/原追減/新增/新增不議</small></button>
-    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>預算明細表，含分區標題，自動偵測欄位</small></button>
+    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>變更預算明細表（v1/v2/v3 版型自動偵測，計算同 skill）</small></button>
   </div>
   <div class="drop" id="dz">
     <input type="file" id="fi" accept=".xlsx,.xlsm,.xls" onchange="onFile(event)">
@@ -82,6 +83,19 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
     <div class="tot" id="totLine"></div>
   </div>
 </div>
+<div class="card" style="font-size:.82rem">
+  <details>
+    <summary style="cursor:pointer;font-weight:500;color:var(--pri)">小數點計算原則（2026-07-10 定案；本工具與 skill change-budget-verify 採同一套）</summary>
+    <p style="margin:.8rem 0 .4rem;color:var(--mut)">目前法規並無明確規定契約變更預算書各階段小數點的統一處理方式，實務多依契約約定、機關慣例及計價系統辦理。為避免計算差異、提升審查一致性，採以下統一原則：</p>
+    <ol style="margin:.4rem 0 0 1.4rem;line-height:1.9">
+      <li><b>工項小計</b>：單價×數量所得金額，小數點二位以下<b>無條件捨去</b>（本工具逐項重算，表填與實算不符即紅字標註，不代改數字）。</li>
+      <li><b>追加、追減及新增工項</b>：各類別分別加總後，小數點二位以下無條件捨去（各項已取 2 位，相加不生第 3 位；本工具逐項加總對照表列小計，差異紅字提醒）。</li>
+      <li><b>契約總價</b>：管理費、營業利潤、保險費及其他間接費用依契約約定計算，最終契約金額以<b>整數元</b>表示（承辦人於 Excel 端辦理；本工具不重算間接費，012/013/014/0B 一律引用表列值）。</li>
+      <li><b>尾差調整</b>：小數點處理產生之尾差，於營業利潤或保險費等<b>間接費用內吸收</b>，不調整直接工程費之單價或數量（本工具唯讀；營業稅與變更總金額×5% 差逾 1 元時警告提醒）。</li>
+    </ol>
+    <p style="margin-top:.6rem;color:var(--mut)">結論：統一小數點處理原則、固定由間接費用吸收尾差，可降低契約變更審查爭議，亦有利於後續結算及審計查核。</p>
+  </details>
+</div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
@@ -99,8 +113,12 @@ dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');if(e.dataTransfer.files.length){document.getElementById('fi').files=e.dataTransfer.files;onFile({target:{files:e.dataTransfer.files}})}});
 
 // ================================================================
+// ▼▼▼ PARSER CORE START ▼▼▼  唯一解析真相來源；改解析只改到 PARSER CORE END。
+// 純函式，module-eval 時不碰 DOM。test.js 原封不動抽這段跑回歸測試。改完務必跑 npm test。
+// ================================================================
 // 數字工具 (對齊 VBA FormatNum)
 // ================================================================
+//__PARSER_CORE_START__
 function N(v){const n=Number(v);return isNaN(n)?0:n}
 function FN(v){
   if(v==null||isNaN(v))return'0';
@@ -113,96 +131,372 @@ function FN(v){
 function cleanName(s){return(s||'').replace(/\r\n|\r|\n/g,' ').replace(/ +/g,' ').trim()}
 
 // ================================================================
-// 排除清單 (對齊 VBA IsExcludedRow)
+// 明細表解析核心：整套移植自 skill change-budget-verify 的
+// budget_parser.py / verify_change.py / gen_change_sign.py（2026-07-10 使用者
+// 指示「網頁跟 skill 算得一模一樣」）。改計算規則請兩邊同步改。
+// 計算原則（DECISIONS.md #14）：金額＝數量×單價取小數 2 位無條件捨去，
+// 逐項精確比對不設容差；小計「表列優先」，不符時紅字標實算值，不代改數字。
 // ================================================================
-const EXCLUDE_NAMES=['包工費','承商利稅','承商利潤','包商利潤',
-  '職業安全衛生費用','職業安全勞工管理',
-  '品質管理費','品管費','營業稅','新制營業稅',
-  '共計','合計','發包工程費','小計',
-  '不可量化','可量化',
-  '工地清潔費','勞工安全衛生訓練費','職業安全衛生計畫書',
-  '風險評估報告書','鐵路行車安全教育訓練',
-  '臨軌工程施工進場申請','鐵路沿線施工安全檢查',
-  '勞工安全衛生作業及管理','品質管理作業費','品管文件製作費',
-  '品質管理費及材料試驗費','場所及材料堆置之防護措施'];
+const TOL_EXACT=0.005, TOL_QTY=1e-6;   // 浮點防護，不是容差，不得調大
+function num(v){return(v==null||isNaN(v))?'—':FN(v)}
+function trunc2(v){return Math.floor(Math.round(v*1000000)/10000)/100}
+function round2(v){return Math.round(v*100)/100}
 
-function isExcludedRow(code,name){
-  for(const ex of EXCLUDE_NAMES) if(name.includes(ex)) return true;
-  const c=code.trim();
-  if(!c) return true;
-  if(c==='0B'||c==='OB'||c==='01') return true;
-  if(c.startsWith('0A')||c.startsWith('OA')) return true;
-  if(c.length<=3 && /^\d+$/.test(c)) return true;
-  return false;
+// ---- Excel 讀格（對齊 budget_parser.load_grid：錯誤儲存格保留 '#REF!' 字串；
+//      kinds 同座標記錄 'f'=公式/'c'=常數，供手動填值偵測）----
+function sheetGrid(ws){
+  const vals=[],kinds=[];
+  if(!ws||!ws['!ref'])return{vals,kinds};
+  const rng=XLSX.utils.decode_range(ws['!ref']);
+  for(let r=0;r<=rng.e.r;r++){
+    const vr=[],kr=[];
+    for(let c=0;c<=rng.e.c;c++){
+      const cell=ws[XLSX.utils.encode_cell({r:r,c:c})];
+      if(!cell||cell.v==null||cell.v===''){vr.push(null);kr.push(null);continue}
+      if(cell.t==='e'){vr.push(String(cell.w||'#ERR!'))}
+      else if(cell.t==='n'){vr.push(cell.v)}
+      else if(cell.t==='b'){vr.push(null)}
+      else{const s=String(cell.v).trim();vr.push(s||null)}
+      kr.push(cell.f!=null?'f':'c');
+    }
+    vals.push(vr);kinds.push(kr);
+  }
+  return{vals,kinds};
+}
+function isErrCell(v){return typeof v==='string'&&v.charAt(0)==='#'}
+function gCell(g,r,c){return(g[r]&&c<g[r].length&&g[r][c]!==undefined)?g[r][c]:null}
+function gStr(g,r,c){const v=gCell(g,r,c);return typeof v==='string'?v.trim():(v==null?'':String(v))}
+function gCode(g,r,c){const v=gCell(g,r,c);if(typeof v==='number'&&Number.isInteger(v))return String(v);return gStr(g,r,c)}
+function gNum(g,r,c){const v=gCell(g,r,c);if(typeof v==='number')return v;if(v==null||isErrCell(v))return null;const n=Number(String(v).replace(/,/g,''));return isNaN(n)?null:n}
+
+// ---- 版型與代碼規則（對齊 budget_parser）----
+const TOTAL_CODES=new Set(['011','012','013','014','01','0B','0B1','0','02','06','0A']);
+const V1_HEADERS={'甲':['nochange','原有項目無追加減'],'乙':['add','原有項目追加'],
+  '丙':['deduct','原有項目追減'],'丁':['new','新增項目'],'戊':['new','新增項目']};
+const V2_RE=/^([A-Z])[.．、]\s*(.+)$/;
+const V3_RE=/^([甲乙丙丁戊])[、.．]\s*(.+)$/;
+function kindFromTitle(t){
+  if(t.includes('無追加減')||t.includes('無增減'))return'nochange';
+  if(t.includes('新增'))return'new';
+  if(t.includes('追加'))return'add';
+  if(t.includes('追減'))return'deduct';
+  return null;
+}
+const COLS={name:1,spec:2,unit:3,oq:4,op:5,oa:6,nq:7,np:8,na:9,dq:10,dp:11,da:12};
+const NUM_FIELDS=['oq','op','oa','nq','np','na','dq','dp','da'];
+const FLD={oa:'合約金額',na:'變更金額',da:'增減金額'};
+
+function detectLayout(g){
+  let v1=0,v2=0,v3=0;
+  for(let r=0;r<g.length;r++){
+    if(V1_HEADERS[gStr(g,r,0)])v1++;
+    let m=V2_RE.exec(gStr(g,r,1));
+    if(m&&kindFromTitle(m[2]))v2++;
+    m=V3_RE.exec(gStr(g,r,2));
+    if(m&&kindFromTitle(m[2]))v3++;
+  }
+  if(v1>=2)return['v1',0];
+  if(v2>=2)return['v2',1];
+  if(v3>=2)return['v3',1];
+  return null;
+}
+function pickSheet(wb){
+  const names=wb.SheetNames;
+  const pri=names.filter(n=>n.includes('明細表')),rest=names.filter(n=>!n.includes('明細表'));
+  for(const n of pri.concat(rest)){
+    const grid=sheetGrid(wb.Sheets[n]);
+    if(detectLayout(grid.vals))return{name:n,grid};
+  }
+  return null;
+}
+function readRow(g,r,base){
+  const lf={row:r,code:gCode(g,r,base),
+    name:gStr(g,r,base+COLS.name).replace(/\n/g,' '),
+    spec:gStr(g,r,base+COLS.spec).replace(/\n/g,' '),
+    unit:gStr(g,r,base+COLS.unit),errors:[],cat:'011',manual:[]};
+  for(const f of NUM_FIELDS){
+    lf[f]=gNum(g,r,base+COLS[f]);
+    const v=gCell(g,r,base+COLS[f]);
+    if(isErrCell(v))lf.errors.push(f+'('+v+')');
+  }
+  return lf;
+}
+function findTotalRow(g,r0,r1,base,label){
+  for(let r=r0+1;r<r1;r++){
+    if(gStr(g,r,base))continue;
+    const name=gStr(g,r,base+COLS.name);
+    if(name&&name!==label)continue;
+    for(let c=base;c<=base+COLS.da;c++)if(gStr(g,r,c)===label)return r;
+  }
+  return null;
+}
+function isChild(code,other){
+  if(other===code||!other.startsWith(code))return false;
+  if(code.charAt(0)==='0')return true;
+  return !/\d/.test(other.charAt(code.length));
+}
+function isLeafCode(code,all){
+  if(TOTAL_CODES.has(code)||V1_HEADERS[code])return false;
+  return !all.some(c=>isChild(code,c));
 }
 
-// ================================================================
-// 分區標題判斷 (對齊 VBA IsSectionHeader)
-// ================================================================
-function isSectionHeader(t){
-  t=(t||'').trim();
-  if(!t) return false;
-  if(t.length===1 && '甲乙丙丁一二三四五六七八九十ABCDabcd'.includes(t.toUpperCase())) return true;
-  if(t.length<2) return false;
-  // [甲] [A] 等
-  if(t[0]==='['&&t.length>=3&&'甲乙丙丁一二三四五六七八九十ABCDabcd'.includes(t[1].toUpperCase())&&t[2]===']') return true;
-  // 全形括號
-  if(t.charCodeAt(0)===0xFF08) return true;
-  // 半形( 後接中文
-  if(t[0]==='('&&t.charCodeAt(1)>127) return true;
-  // 甲、A. 等
-  const ch=t[0];
-  if('甲乙丙丁一二三四五六七八九十ABCDEabcde0123456789'.includes(ch.toUpperCase())){
-    if(t.length>=2){
-      const c2=t[1];
-      if(c2==='、'||c2==='.'||c2===' '||c2==='\u3001'||c2==='．') return true;
+function parseGridBudget(g,sheetName){
+  const det=detectLayout(g);
+  if(!det)throw new Error('工作表「'+sheetName+'」偵測不到已知版型（甲乙丙丁戊、A.~E. 或 甲、~戊、）');
+  const layout=det[0],base=det[1];
+  const marks=[];
+  for(let r=0;r<g.length;r++){
+    if(layout==='v1'){const v=gStr(g,r,base);if(V1_HEADERS[v])marks.push([r,v,V1_HEADERS[v][0],V1_HEADERS[v][1]])}
+    else if(layout==='v3'){const m=V3_RE.exec(gStr(g,r,base+COLS.name));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
+    else{const m=V2_RE.exec(gStr(g,r,base));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
+  }
+  const budget={layout,base,sheetName,blocks:[],projectName:'',changeLabel:'',formulaInfo:false};
+  for(let r=0;r<Math.min(6,g.length);r++)
+    for(let c=0;c<Math.min(20,(g[r]||[]).length);c++){
+      const t=gStr(g,r,c);
+      if(t.includes('工程名稱')&&!budget.projectName)
+        budget.projectName=t.includes('：')?t.split('：').pop().trim():gStr(g,r,c+1);
+      const m=/第\s*\S+\s*次?\s*變更/.exec(t);
+      if(m&&!budget.changeLabel)budget.changeLabel=m[0].replace(/\s+/g,'');
+    }
+  const totalLabel=layout==='v3'?'小計':'計';
+  marks.forEach((mk,i)=>{
+    const r0=mk[0],rNext=i+1<marks.length?marks[i+1][0]:g.length;
+    const totalRow=findTotalRow(g,r0,rNext,base,totalLabel);
+    const r1=totalRow!=null?totalRow+1:rNext;
+    const blk={key:mk[1],kind:mk[2],title:mk[3],r0,r1,totalRow,negotiated:null,leaves:[],parents:[],specials:{}};
+    if(blk.kind==='new')blk.negotiated=!mk[3].includes('不議價');
+    const codesBlk=[];
+    for(let r=r0+1;r<r1;r++){const cd=gCode(g,r,base);if(cd)codesBlk.push(cd)}
+    const end=totalRow!=null?totalRow:r1;
+    for(let r=r0+1;r<end;r++){
+      const code=gCode(g,r,base);
+      if(!code)continue;
+      const row=readRow(g,r,base);
+      if(['011','012','013','014','01','0B','0B1'].includes(code)&&!(code in blk.specials))blk.specials[code]=row;
+      if(isLeafCode(code,codesBlk)){
+        // v3 區塊內全是包工費工項；v1/v2 依代碼前綴分 011/013/014
+        row.cat=layout==='v3'?'011':(code.startsWith('013')?'013':code.startsWith('014')?'014':'011');
+        blk.leaves.push(row);
+      }else if(!TOTAL_CODES.has(code)){
+        blk.parents.push(row);   // 有子項的大項：不進金額鏈，供大項對照
+      }
+    }
+    if(layout==='v3'&&totalRow!=null&&!('011'in blk.specials))blk.specials['011']=readRow(g,totalRow,base);
+    budget.blocks.push(blk);
+  });
+  if(layout==='v3'){
+    // v3 的 012/013/014/0B 彙總只有表尾一份：掛到最後一個非 nochange 區塊
+    const target=[...budget.blocks].reverse().find(b=>b.kind!=='nochange');
+    if(target){
+      const rTail=Math.max(...budget.blocks.map(b=>b.r1).concat([0]));
+      for(let r=rTail;r<g.length;r++){
+        const code=gCode(g,r,base);
+        if(['012','013','014','0B','0B1'].includes(code)&&!(code in target.specials))target.specials[code]=readRow(g,r,base);
+      }
     }
   }
-  return false;
+  return budget;
+}
+function annotateManual(budget,kinds){
+  // 金額欄有值卻是手打常數 → 脫離公式鏈的地雷；就算目前數值正確也要記
+  for(const blk of budget.blocks)
+    for(const lf of blk.leaves.concat(blk.parents,Object.values(blk.specials)))
+      for(const f of ['oa','na','da']){
+        const r=lf.row,c=budget.base+COLS[f];
+        const k=(kinds[r]&&c<kinds[r].length)?kinds[r][c]:null;
+        if(k==='c'&&lf[f]!=null&&!lf.manual.includes(f))lf.manual.push(f);
+      }
 }
 
-// ================================================================
-// MatchSection (對齊 VBA MatchSection v3.1)
-// ================================================================
-function matchSection(text,type){
-  const t=text;
-  switch(type){
-    case '追加':
-      if(t.includes('追加')&&(t.includes('原')||t.includes('乙'))){
-        if(!t.includes('無追加')) return true;
-      }
-      return false;
-    case '追減':
-      if(t.includes('追減')&&(t.includes('原')||t.includes('丙'))){
-        if(!t.includes('無追加減')) return true;
-      }
-      return false;
-    case '新增':
-      if(t.includes('新增')&&(t.includes('丁')||t.includes('項目')||t.includes('（四）')||t.includes('(四)')||t.includes('戊')||t.includes('（五）')||t.includes('(五)'))) return true;
-      // 也比對 D. E. 開頭
-      if(t.includes('新增')) return true;
-      return false;
+// ---- 驗算（對齊 verify_change.leaf_issues：紅字必附計算式）----
+function effDelta(x,kind){
+  if(x.da!=null)return x.da;
+  if(x.na!=null){
+    const oa=x.oa!=null?x.oa:(kind==='new'?0:null);
+    if(oa!=null)return x.na-oa;
   }
-  return false;
+  return null;
+}
+function leafIssues(lf,kind){
+  const iss=[];
+  if(lf.errors.length)iss.push('儲存格含公式錯誤：'+lf.errors.join('、')+'（回 Excel 修公式）');
+  if(lf.oq!=null&&lf.op!=null&&lf.oa!=null){
+    const exp=trunc2(lf.oq*lf.op);
+    if(Math.abs(lf.oa-exp)>TOL_EXACT)iss.push('合約金額 表填 '+num(lf.oa)+'，實算 '+num(exp)+'＝合約數量 '+num(lf.oq)+'×單價 '+num(lf.op)+' 取2位截斷');
+  }
+  if(lf.nq!=null&&lf.np!=null&&lf.na!=null){
+    const exp=trunc2(lf.nq*lf.np);
+    if(Math.abs(lf.na-exp)>TOL_EXACT)iss.push('變更金額 表填 '+num(lf.na)+'，實算 '+num(exp)+'＝變更數量 '+num(lf.nq)+'×單價 '+num(lf.np)+' 取2位截斷');
+  }
+  const oq0=lf.oq!=null?lf.oq:(kind==='new'?0:null);
+  const oa0=lf.oa!=null?lf.oa:(kind==='new'?0:null);
+  if(lf.dq!=null&&lf.nq!=null&&oq0!=null&&Math.abs(lf.dq-(lf.nq-oq0))>TOL_QTY)
+    iss.push('增減數量 表填 '+num(lf.dq)+'，實算 '+num(lf.nq-oq0)+'＝變更數量−合約數量');
+  if(lf.da!=null&&lf.na!=null&&oa0!=null){
+    const exp=round2(lf.na-oa0);
+    if(Math.abs(lf.da-exp)>TOL_EXACT)iss.push('增減金額 表填 '+num(lf.da)+'，實算 '+num(exp)+'＝變更金額−合約金額');
+  }
+  return iss;
+}
+function parentWarns(budget){
+  const out=[];
+  for(const blk of budget.blocks)
+    for(const p of blk.parents){
+      const kids=blk.leaves.filter(l=>isChild(p.code,l.code));
+      if(!kids.length)continue;
+      for(const f of ['oa','na','da']){
+        if(p[f]==null)continue;
+        const vals=kids.map(k=>k[f]).filter(v=>v!=null);
+        if(!vals.length)continue;
+        const s=vals.reduce((a,b)=>a+b,0);
+        if(Math.abs(p[f]-s)>TOL_EXACT)out.push('Excel第'+(p.row+1)+'列 大項'+p.code+'「'+p.name+'」'+FLD[f]+' 表填 '+num(p[f])+'，子項合計 '+num(s)+'（大項公式範圍可能沒拉對）');
+      }
+    }
+  return out;
+}
+function manualList(budget){
+  const out=[];
+  for(const blk of budget.blocks)
+    for(const lf of blk.leaves.concat(blk.parents,Object.values(blk.specials)))
+      if(lf.manual.length)out.push('Excel第'+(lf.row+1)+'列 '+lf.code+'「'+lf.name+'」'+lf.manual.map(f=>FLD[f]).join('、')+' 為手打常數（脫離公式鏈，上游改動不會跟動）');
+  return out;
 }
 
-// ================================================================
-// 檔案上傳
-// ================================================================
-function onFile(e){
-  const file=e.target.files[0];if(!file)return;
-  document.getElementById('info').style.display='block';
-  document.getElementById('info').textContent='✓ '+file.name;
-  document.getElementById('err').style.display='none';
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    try{
-      const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'});
-      res=fmt==='template'?parseTemplate(wb):parseEstimate(wb);
-      render();
-    }catch(err){showErr('解析失敗：'+err.message);console.error(err)}
+// ---- 彙整（對齊 gen_change_sign.summarize：表列小計優先、金額鏈全重算）----
+function spRow(blk,code){const sp=blk?blk.specials[code||'011']:null;return sp?sp.row:null}
+function summarize(budget){
+  const S={add:null,deduct:null,newList:[],warn:[]};
+  for(const blk of budget.blocks){
+    if(blk.kind==='add')S.add=blk;
+    else if(blk.kind==='deduct')S.deduct=blk;
+    else if(blk.kind==='new')S.newList.push(blk);
+  }
+  const sum011=blk=>blk?blk.leaves.filter(l=>l.cat==='011').reduce((s,l)=>s+(effDelta(l,blk.kind)||0),0):0;
+  const sheet011=blk=>{
+    if(!blk)return 0;
+    const sp=blk.specials['011'];
+    const d=sp?effDelta(sp,blk.kind):null;
+    return d!=null?d:sum011(blk);
   };
-  reader.readAsArrayBuffer(file);
+  const specialDelta=(blk,code)=>{
+    if(!blk)return 0;
+    const sp=blk.specials[code]||(code==='0B1'?blk.specials['0B']:null);
+    if(!sp)return 0;
+    const d=effDelta(sp,blk.kind);
+    if(d==null){S.warn.push(blk.key+' 區塊彙總列 '+code+' 金額無法推算（第 '+(sp.row+1)+' 列，可能含 #REF!），以 0 計入，務必人工確認。');return 0}
+    return d;
+  };
+  const all=[S.add,S.deduct].concat(S.newList).filter(Boolean);
+  S.add_011=sheet011(S.add);S.ded_011=sheet011(S.deduct);
+  S.new_011=S.newList.reduce((s,b)=>s+sheet011(b),0);
+  S.add_011_calc=sum011(S.add);S.ded_011_calc=sum011(S.deduct);
+  S.new_011_calc=S.newList.reduce((s,b)=>s+sum011(b),0);
+  S.sec4=S.add_011+S.ded_011+S.new_011;                       // (四) 變更項目總合
+  S.d012=all.reduce((s,b)=>s+specialDelta(b,'012'),0);
+  S.d013=all.reduce((s,b)=>s+specialDelta(b,'013'),0);
+  S.d014=all.reduce((s,b)=>s+specialDelta(b,'014'),0);
+  S.sec5=S.d012+S.d013+S.d014;                                // (五) 包工費以外
+  S.sec6=S.sec4+S.sec5;                                       // (六) 未稅
+  S.sec7=all.reduce((s,b)=>s+specialDelta(b,'0B1'),0);        // (七) 0B 營業稅
+  S.sec8=S.sec6+S.sec7;                                       // (八) 含稅
+  if(Math.abs(S.sec7-S.sec6*0.05)>1.0)
+    S.warn.push('0B 營業稅 '+num(S.sec7)+' 與 變更總金額×5% '+num(S.sec6*0.05)+' 差逾 1 元，請確認。');
+  return S;
+}
+
+// ---- 句型（對齊 gen_change_sign sent_add/sent_deduct/sent_new，v5 範本句型）----
+function sgnWord(v){return(v||0)>=0?'追加':'追減'}
+function sentAdd(lf){
+  return '項目'+lf.code+'，工項名稱：'+lf.name+'，原契約數量'+num(lf.oq)+lf.unit+
+    '，單價為'+num(lf.op)+'元，追加數量'+num(lf.dq)+lf.unit+
+    '，追加金額'+num(effDelta(lf,'add'))+'元。';
+}
+function sentDeduct(lf){
+  const d=effDelta(lf,'deduct');
+  if(lf.nq===0)
+    return '項目'+lf.code+'，工項名稱：'+lf.name+'，原契約數量'+num(lf.oq)+lf.unit+
+      '，單價為'+num(lf.op)+'元，全數追減，追減金額'+num(d!=null?Math.abs(d):null)+'元。';
+  return '項目'+lf.code+'，工項名稱：'+lf.name+'，原契約數量'+num(lf.oq)+lf.unit+
+    '，單價為'+num(lf.op)+'元，追減數量'+num(lf.dq!=null?Math.abs(lf.dq):null)+lf.unit+
+    '，追減金額'+num(d!=null?Math.abs(d):null)+'元。';
+}
+function sentNew(lf){
+  return '項目'+lf.code+'，工項名稱：'+lf.name+'，新增數量'+num(lf.nq)+lf.unit+
+    '，新增單價'+num(lf.np)+'元，追加金額'+num(effDelta(lf,'new'))+'元。';
+}
+function warnSuffix(lf,kind){
+  const iss=leafIssues(lf,kind);
+  return iss.length?'【警告(Excel第'+(lf.row+1)+'列)：'+iss.join('；')+'】':'';
+}
+function subtotalWarn(sv,cv,row){
+  if(Math.abs(sv-cv)>0.005){
+    const loc=row!=null?'(Excel第'+(row+1)+'列)':'';
+    return '【警告'+loc+'：逐項加總實算 '+num(cv)+' 元，與表列小計差 '+num(round2(sv-cv))+' 元】';
+  }
+  return '';
+}
+
+// ---- 報表組文（對齊 gen_change_sign.build_lines 的變更項目段＋金額鏈）----
+function estReport(parsed){
+  const S=parsed.S,budget=parsed.budget,groups=[];
+  let lines=[];
+  const addL=S.add?S.add.leaves.filter(l=>l.cat==='011'):[];
+  addL.forEach((lf,i)=>lines.push((i+1)+'.'+sentAdd(lf)+warnSuffix(lf,'add')));
+  if(!addL.length)lines.push('無。');
+  lines.push('小計：追加'+num(S.add_011)+'元。'+subtotalWarn(S.add_011,S.add_011_calc,spRow(S.add)));
+  groups.push({title:'(一) 原契約工項追加部分',cls:'sha',n:addL.length,lines});
+  lines=[];
+  const dedL=S.deduct?S.deduct.leaves.filter(l=>l.cat==='011'):[];
+  dedL.forEach((lf,i)=>lines.push((i+1)+'.'+sentDeduct(lf)+warnSuffix(lf,'deduct')));
+  if(!dedL.length)lines.push('無。');
+  lines.push('小計：追減'+num(Math.abs(S.ded_011))+'元。'+subtotalWarn(S.ded_011,S.ded_011_calc,spRow(S.deduct)));
+  groups.push({title:'(二) 原契約工項追減部分',cls:'shr',n:dedL.length,lines});
+  lines=[];
+  const newBlks=S.newList.filter(b=>b.leaves.some(l=>l.cat==='011'));
+  let title3='(三) 新增項目',seq=0,negoN=0,noNegoN=0;
+  if(newBlks.length<=1){
+    const blk=newBlks[0]||null;
+    if(blk&&blk.negotiated===true)title3+='（均須議價，依政府採購法規辦理）';
+    else if(blk&&blk.negotiated===false)title3+='（不議價）';
+    for(const lf of(blk?blk.leaves:[])){
+      if(lf.cat!=='011')continue;
+      seq++;lines.push(seq+'.'+sentNew(lf)+warnSuffix(lf,'new'));
+      if(blk.negotiated===false)noNegoN++;else negoN++;
+    }
+    if(!seq)lines.push('無。');
+  }else{
+    for(const blk of newBlks){
+      lines.push(blk.negotiated?'◎需議價部分（依政府採購法規辦理）：':'◎不議價部分：');
+      for(const lf of blk.leaves){
+        if(lf.cat!=='011')continue;
+        seq++;lines.push(seq+'.'+sentNew(lf)+warnSuffix(lf,'new'));
+        if(blk.negotiated===false)noNegoN++;else negoN++;
+      }
+    }
+  }
+  const newRow=newBlks.length===1?spRow(newBlks[0]):null;
+  lines.push('小計：追加'+num(S.new_011)+'元。'+subtotalWarn(S.new_011,S.new_011_calc,newRow));
+  groups.push({title:title3,cls:'shn',n:seq,lines});
+  const chain=[
+    '(四) 綜上，變更項目總合(一)~(三)：'+sgnWord(S.sec4)+'金額'+num(Math.abs(S.sec4))+'元(未稅)。',
+    '(五) 包工費以外其他項目(未稅)：',
+    '　1.項目012，承商利潤及保險費(約包工費10％)，依本次變更後包工費與原包工費（未稅）比例調整，'+sgnWord(S.d012)+'金額'+num(Math.abs(S.d012))+'元。(追加勿逾10%，追減宜多扣)',
+    '　2.項目013，勞工安全衛生費用，'+sgnWord(S.d013)+'金額'+num(Math.abs(S.d013))+'元。',
+    '　3.項目014，品質管理費及材料檢驗費用，'+sgnWord(S.d014)+'金額'+num(Math.abs(S.d014))+'元。',
+    '　4.小計：'+sgnWord(S.sec5)+num(Math.abs(S.sec5))+'元。',
+    '(六) 變更總金額：(四)+(五)='+sgnWord(S.sec6)+'金額'+num(Math.abs(S.sec6))+'元（未稅）。',
+    '(七) 變更0B營業稅(約發包工程費5％)：'+sgnWord(S.sec7)+'金額'+num(Math.abs(S.sec7))+'元。',
+    '(八) 本次變更最終變更金額（不包含原契約金額）：變更總金額(六)+變更0B營業稅(七)='+sgnWord(S.sec8)+'金額'+num(Math.abs(S.sec8))+'元（含稅）。'
+  ];
+  groups.push({title:'(四)~(八) 金額變更彙總（表列小計優先，同 skill 產簽邏輯）',cls:'shd',n:null,lines:chain});
+  const w=[];
+  if(!budget.formulaInfo)w.push('⚠ .xls 檔無公式資訊，手動填值檢查不支援（skill 同此限制）。');
+  else manualList(budget).forEach(x=>w.push('⚠ '+x));
+  parentWarns(budget).forEach(x=>w.push('⚠ '+x));
+  S.warn.forEach(x=>w.push('⚠ '+x));
+  if(w.length)groups.push({title:'檢查提醒（不影響上列數字，請回 Excel 確認）',cls:'shg',n:w.length,lines:w});
+  return{groups,counts:{add:addL.length,ded:dedL.length,nego:negoN,noNego:noNegoN},final:chain[chain.length-1]};
 }
 
 // ================================================================
@@ -237,180 +531,16 @@ function parseTemplate(wb){
 }
 
 // ================================================================
-// 格式 B：概算書格式 (對齊 VBA ReadBudgetSection)
+// 格式 B：變更預算明細表（v1/v2/v3 版型偵測＋結構化取項，整套對齊 skill budget_parser）
 // ================================================================
-function parseEstimate(wb){
-  const r={add:[],reduce:[],newItems:[],noNeg:[],warn:[]};
-
-  // FindMainSheet
-  let ws=null,wsName='';
-  for(const n of wb.SheetNames){if(n.includes('明細')){ws=wb.Sheets[n];wsName=n;break}}
-  if(!ws)for(const n of wb.SheetNames){if(n.includes('變更')||n.includes('概算')){ws=wb.Sheets[n];wsName=n;break}}
-  if(!ws){ws=wb.Sheets[wb.SheetNames[0]];wsName=wb.SheetNames[0]}
-  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',range:0});
-
-  // 偵測欄位 (對齊 VBA 邏輯)
-  let cCode=0,cName=1,cUnit=3,cOrigQty=4,cPrice1=5,cPrice2=8,cChgQty=10,cChgAmt=12,cNewAmt=-1,cNewQty=-1;
-  let foundChangeCol=0,foundOrigCol=0,foundNewCol=0;
-
-  for(let rH=0;rH<Math.min(10,rows.length);rH++){
-    const row=rows[rH];
-    for(let ch=0;ch<Math.min(20,row.length);ch++){
-      const s=(String(row[ch]||'')).replace(/\s+/g,'').replace(/\n/g,'');
-      if(!s) continue;
-      if(s==='項次'||s==='項目') cCode=ch;
-      if(s==='工程項目'||s==='工項名稱') cName=ch;
-      if(s==='單位') cUnit=ch;
-      if(s.includes('比較增減')||s.includes('依現況結算')) foundChangeCol=ch;
-      if(s.includes('合約')||s.includes('原預算')||s.includes('契約')) foundOrigCol=ch;
-      if(s.includes('變更')&&s.includes('預算')) foundNewCol=ch;
-    }
-  }
-
-  // v3.2: cCode===cName 時，cName=cCode+1
-  if(cCode===cName) cName=cCode+1;
-
-  // 二次掃描找增減欄
-  if(!foundChangeCol){
-    for(let rH=0;rH<Math.min(10,rows.length);rH++){
-      const row=rows[rH];
-      for(let ch=0;ch<Math.min(20,row.length);ch++){
-        const s=(String(row[ch]||'')).replace(/\s+/g,'').replace(/\n/g,'');
-        if(s.includes('增減')||s.includes('追加減')) foundChangeCol=ch;
-      }
-    }
-  }
-
-  // 在大標題群組下找子標題（數量/單價/金額）
-  function findSubCols(startCol){
-    const result={qty:-1,price:-1,amt:-1};
-    for(let ch=startCol;ch<=startCol+3&&ch<20;ch++){
-      for(let rH=0;rH<Math.min(10,rows.length);rH++){
-        const s2=(String(rows[rH][ch]||'')).replace(/\s+/g,'').replace(/\n/g,'');
-        if(s2==='數量'&&result.qty<0) result.qty=ch;
-        if(s2==='單價'&&result.price<0) result.price=ch;
-        if((s2==='金額'||s2==='複價')&&result.amt<0) result.amt=ch;
-      }
-    }
-    return result;
-  }
-
-  if(foundOrigCol){
-    const sub=findSubCols(foundOrigCol);
-    if(sub.qty>=0) cOrigQty=sub.qty;
-    if(sub.price>=0) cPrice1=sub.price;
-  }
-  if(foundNewCol){
-    const sub=findSubCols(foundNewCol);
-    if(sub.qty>=0) cNewQty=sub.qty;
-    if(sub.price>=0) cPrice2=sub.price;
-    if(sub.amt>=0) cNewAmt=sub.amt;
-  }
-  if(foundChangeCol){
-    const sub=findSubCols(foundChangeCol);
-    if(sub.qty>=0) cChgQty=sub.qty;
-    if(sub.amt>=0) cChgAmt=sub.amt;
-  }
-
-  console.log('欄位偵測:',{cCode,cName,cUnit,cOrigQty,cPrice1,cPrice2,cChgQty,cChgAmt,foundOrigCol,foundNewCol,foundChangeCol});
-
-  // 對三個區段各自讀取 (對齊 VBA ReadBudgetSection 的分段邏輯)
-  function readSection(sectionType){
-    const items=[];
-    const maxRow=rows.length;
-    let i=0;
-
-    while(i<maxRow){
-      // 找 startRow
-      let startRow=-1;
-      let matched=false;
-      for(;i<maxRow;i++){
-        const row=rows[i];
-        let cellA=String(row[cCode]||'').trim();
-        let cellB=String(row[cName]||'').trim();
-        if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
-        const combo=cellA+' '+cellB;
-        if(matchSection(combo,sectionType)){
-          if(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo)){
-            startRow=i+1;matched=true;break;
-          }
-        }
-      }
-      if(!matched) break;
-
-      // 找 endRow
-      let endRow=maxRow-1;
-      for(let j=startRow;j<maxRow;j++){
-        const row=rows[j];
-        let cellA=String(row[cCode]||'').trim();
-        let cellB=String(row[cName]||'').trim();
-        if(!cellA&&!cellB){cellA=String(row[0]||'').trim();cellB=String(row[1]||'').trim()}
-        const combo=cellA+' '+cellB;
-        if(cellB.includes('合計')||cellB.includes('共計')){endRow=j-1;break;}
-        if(j>startRow&&(isSectionHeader(cellA)||isSectionHeader(cellB)||isSectionHeader(combo))){
-          endRow=j-1;break;
-        }
-      }
-
-      // 讀取資料列
-      for(let j=startRow;j<=endRow;j++){
-        const row=rows[j];
-        const code=String(row[cCode]||'').trim();
-        const name=cleanName(String(row[cName]||''));
-        const unit=String(row[cUnit]||'').trim();
-        let mAmt=row[cChgAmt];
-        let qty=N(row[cChgQty]);
-
-        // 針對新增項目，如果比較增減欄位沒金額，嘗試改抓變更後預算的金額欄位
-        if((mAmt===''||mAmt===null||mAmt===undefined||Number(mAmt)===0) && sectionType==='新增'){
-          if(cNewAmt>=0) mAmt=row[cNewAmt];
-          if((qty===0 || isNaN(qty)) && cNewQty>=0) qty=N(row[cNewQty]);
-        }
-
-        // IsValidItem 邏輯
-        if(!code&&!name) continue;
-        if(isExcludedRow(code,name)) continue;
-        if(sectionType!=='新增'){
-          if(code.length===4&&unit==='式') continue;
-        }
-        if(mAmt===''||mAmt===null||mAmt===undefined||isNaN(Number(mAmt))) continue;
-        if(Number(mAmt)===0) continue;
-
-        // 讀取欄位值
-        let origQty=String(row[cOrigQty]||'').trim();
-        if(origQty==='0'||origQty==='0.0') origQty='';
-        else if(origQty&&!isNaN(Number(origQty))) origQty=FN(Number(origQty));
-
-        const fVal=N(row[cPrice1]);
-        const iVal=N(row[cPrice2]);
-        let price=0;
-        if(fVal!==0) price=fVal;
-        else if(iVal!==0) price=iVal;
-
-        const amt=N(mAmt);
-
-        const item={code,name,origQty,unit,price,qty,amt};
-
-        // 稽核
-        if(unit!=='式'&&price&&qty){
-          const calc=Math.round(price*qty*100)/100;
-          if(Math.abs(calc-Math.round(amt*100)/100)>0.01)
-            item.warn='【警告：單價'+price+'x數量'+qty+'='+calc+'，與原表金額'+Math.round(amt*100)/100+'不符】';
-        }
-        items.push(item);
-      }
-      i=endRow+1;
-    }
-    return items;
-  }
-
-  r.add=readSection('追加');
-  r.reduce=readSection('追減');
-  r.newItems=readSection('新增');
-  // 概算書格式目前不拆不議價（對齊 VBA: newNoNegCount = 0）
-  r.noNeg=[];
-
-  return r;
+function parseEstimate(wb,isXlsx){
+  const pick=pickSheet(wb);
+  if(!pick)throw new Error('所有工作表都偵測不到已知版型（甲乙丙丁戊、A.~E. 或 甲、~戊、）。請確認是「變更預算明細表」；新版型請依 skill 的 docs/FORMATS.md 流程處理，不要手抄數字。');
+  const budget=parseGridBudget(pick.grid.vals,pick.name);
+  if(isXlsx){budget.formulaInfo=true;annotateManual(budget,pick.grid.kinds)}
+  const parsed={mode:'budget',budget,S:summarize(budget)};
+  parsed.report=estReport(parsed);
+  return parsed;
 }
 
 // ================================================================
@@ -420,28 +550,77 @@ function fmtSec(type,items){
   const lines=[];
   items.forEach((it,i)=>{
     let l=(i+1)+'、項目：'+it.code+'，工項名稱：'+it.name;
+    const u=it.unit||'';
     if(type==='add'||type==='reduce'){
-      if(it.origQty) l+='，原契約數量'+it.origQty;
-      l+='，單價為'+FN(it.price);
-      if(type==='add') l+='，追加數量'+FN(it.qty)+'，追加金額'+FN(it.amt)+'元。';
-      else l+='，追減數量'+FN(it.qty)+'，追減金額'+FN(it.amt)+'元。';
+      if(it.origQty) l+='，原契約數量'+it.origQty+u;
+      l+='，單價為'+FN(it.price)+'元';
+      if(type==='add') l+='，追加數量'+FN(it.qty)+u+'，追加金額'+FN(it.amt)+'元。';
+      else l+='，追減數量'+FN(Math.abs(it.qty))+u+'，追減金額'+FN(Math.abs(it.amt))+'元。';
     }else{
-      l+='，新增數量'+FN(it.qty)+'，新增單價'+FN(it.price)+'，追加金額'+FN(it.amt)+'元。';
+      l+='，新增數量'+FN(it.qty)+u+'，新增單價'+FN(it.price)+'元，追加金額'+FN(it.amt)+'元。';
     }
     if(it.warn) l+=it.warn;
     lines.push({t:l,w:!!it.warn});
   });
   const tot=items.reduce((s,it)=>s+it.amt,0);
-  lines.push({t:(items.length+1)+'、共計'+(type==='reduce'?'追減':'追加')+FN(tot)+'元。',w:false});
+  lines.push({t:'小計：'+(type==='reduce'?'追減'+FN(Math.abs(tot)):'追加'+FN(tot))+'元。',w:false});
   return{lines,tot};
+}
+//__PARSER_CORE_END__
+// ================================================================
+// ▲▲▲ PARSER CORE END ▲▲▲
+// ================================================================
+
+// ================================================================
+// 檔案上傳（UI glue；呼叫上方 PARSER CORE 的 parseTemplate / parseEstimate）
+// ================================================================
+function onFile(e){
+  const file=e.target.files[0];if(!file)return;
+  document.getElementById('info').style.display='block';
+  document.getElementById('info').textContent='✓ '+file.name;
+  document.getElementById('err').style.display='none';
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'});
+      const isXlsx=/\.xlsx$/i.test(file.name);
+      res=fmt==='template'?parseTemplate(wb):parseEstimate(wb,isXlsx);
+      render();
+    }catch(err){showErr('解析失敗：'+err.message);console.error(err)}
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 // ================================================================
 // 渲染
 // ================================================================
 function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function renderBudget(){
+  const rp=res.report,c=rp.counts;
+  document.getElementById('tags').innerHTML=
+    '<span class="tag ta">(一)追加 '+c.add+' 筆</span>'+
+    '<span class="tag tr">(二)追減 '+c.ded+' 筆</span>'+
+    '<span class="tag tn">(三)新增-議價 '+c.nego+' 筆</span>'+
+    '<span class="tag td">新增-不議價 '+c.noNego+' 筆</span>';
+  let bH='';
+  rp.groups.forEach(gp=>{
+    const body=gp.lines.map(l=>{
+      let h=esc(l);
+      h=h.replace(/【警告[^】]*】/g,m=>'<span class="w">'+m+'</span>');
+      if(l.charAt(0)==='⚠')h='<span class="wo">'+h+'</span>';
+      return h;
+    }).join('\n');
+    bH+='<div class="sec"><div class="sh '+gp.cls+'"><span>'+gp.title+'：</span>'+(gp.n!=null?'<span style="font-size:.75rem;font-weight:400">'+gp.n+' 筆</span>':'')+'</div><div class="sb">'+body+'</div></div>';
+  });
+  document.getElementById('blocks').innerHTML=bH;
+  const tl=document.getElementById('totLine');
+  tl.textContent=rp.final;
+  tl.style.display='block';
+  document.getElementById('out').style.display='block';
+}
 function render(){
   if(!res)return;
+  if(res.mode==='budget'){renderBudget();return}
   const secs=[
     {k:'add',ty:'add',t:'(一) 原契約工項－追加',c:'a',hc:'sha',d:res.add},
     {k:'reduce',ty:'reduce',t:'(二) 原契約工項－追減',c:'r',hc:'shr',d:res.reduce},
@@ -463,7 +642,7 @@ function render(){
   // 加總行 (對齊 VBA finalLine 格式)
   const tl=document.getElementById('totLine');
   const net=tots.add+tots.reduce+tots.newItems+(tots.noNeg||0);
-  tl.textContent='本次契約變更總計：(一) 原契約工項-追加 '+FN(tots.add)+' 元 + (二) 原契約工項-追減 '+FN(tots.reduce)+' 元 + (三) 新增項目(須議價) '+FN(tots.newItems)+' 元 + (四) 新增項目(不議價) '+FN(tots.noNeg||0)+' 元 = 本次變更淨額 '+FN(net)+' 元。';
+  tl.textContent='本次契約變更總計：(一) 原契約工項-追加 '+FN(tots.add)+' 元 + (二) 原契約工項-追減 '+FN(tots.reduce)+' 元 + (三) 新增項目(須議價) '+FN(tots.newItems)+' 元 + (四) 新增項目(不議價) '+FN(tots.noNeg||0)+' 元 = 本次變更淨額 '+FN(net)+' 元。（未稅；範本格式無 012/013/014/0B 資料，含稅最終金額請用概算書格式或 skill 計算）';
   tl.style.display='block';
   document.getElementById('out').style.display='block';
   if(res.warn&&res.warn.length)showErr('注意：'+res.warn.join('；'));
@@ -473,7 +652,10 @@ function render(){
 // 全文輸出
 // ================================================================
 function fullText(){
-  if(!res)return'';let t='';
+  if(!res)return'';
+  if(res.mode==='budget')
+    return res.report.groups.map(gp=>gp.title+'：\n'+gp.lines.join('\n')).join('\n\n');
+  let t='';
   [{ty:'add',h:'(一) 原契約工項-追加：',d:res.add},
    {ty:'reduce',h:'(二) 原契約工項-追減：',d:res.reduce},
    {ty:'new',h:'(三) 新增項目（須辦理議價）：',d:res.newItems}
