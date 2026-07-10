@@ -18,7 +18,7 @@
 | 項目 | 版次 |
 |---|---|
 | 工具版本 | **v4.0**（2026-07-10）：概算書格式解析核心整套移植自 skill change-budget-verify（budget_parser／verify_change／gen_change_sign），輸出含 (四)~(八) 金額鏈，計算結果與 skill 一致 |
-| 輸出句型對應範本 | 1150415-專工處契約變更格式範本 **v5**（2026-07-09 換版：「工項名稱」後加全形冒號）。本工具**不產簽稿、repo 內不放範本檔**，只有輸出句型跟著範本走；現行範本以 change-budget-verify repo 的 `templates\` 資料夾為準（該夾永遠只放現行一份） |
+| 輸出句型對應範本 | 機關現行變更簽格式範本 **v5**（2026-07-09 換版：「工項名稱」後加全形冒號）。本工具**不產簽稿、repo 內不放範本檔**，只有輸出句型跟著範本走；現行範本以 change-budget-verify repo 的 `templates\` 資料夾為準（該夾永遠只放現行一份） |
 | 計算原則 | 小數點計算原則四條（2026-07-10 定案，見下方「小數點計算原則」章節） |
 
 ---
@@ -154,9 +154,8 @@ index.html
 3. **看紅字與 ⚠**：紅字＝表填與實算不符（附計算式與 Excel 列號），回 Excel 修正後重新上傳；⚠＝手打常數、大項對照等提醒。**Excel 是唯一權威，不要在輸出文字裡改數字。**
 4. **複製全部文字／下載 TXT**，貼進變更簽（句型同 v5 範本，含 (四)~(八) 金額鏈）。
 
-**一案一夾**：實際案件的預算書建議放 `projects\<案名>\`（整夾已列入 .gitignore，不會進版控）。
-操作範例檔在 `projects\範例-二水第2次變更\操作檔案01範例-二水第2次變更預算-1150223.xlsx`，
-上傳它即可看到完整輸出（含紅字警告示範），其金額鏈結果與 skill 產簽一致。
+**一案一夾**：實際案件的預算書建議放 `projects\<案名>\`（整夾已列入 .gitignore，
+含案件資料，不會進版控、也不會出現在本公開 repo）。
 
 ---
 
@@ -183,14 +182,10 @@ Settings → Pages → Deploy from branch
 ```text
 project/
 │
-├─ index.html          ← 工具本體（PARSER CORE 區塊＝唯一解析真相來源）
+├─ index.html   ← 工具本體，單一檔案、開瀏覽器即用
 ├─ README.md
-├─ test.js             ← 回歸測試（npm test；直接抽 index.html 的 PARSER CORE 執行）
-├─ test/
-│  ├─ make-fixture.js  ← 產匿名測試資料（改 fixture 需同步更新 test.js golden）
-│  └─ fixture.xlsx     ← 匿名 golden 樣本（唯一進版控的 xlsx）
-└─ projects/           ← 一案一夾，整夾不版控（比照 change-budget-verify）
-   └─ 範例-二水第2次變更/  ← 操作範例檔在這裡
+└─ projects/    ← 一案一夾放各案預算書（含案件資料，不進版控）
+   └─ <案名>/
 ```
 
 ---
