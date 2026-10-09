@@ -54,13 +54,13 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
 <div class="wrap">
 <header>
   <h1>工程契約變更工項擷取工具</h1>
-  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字｜v4.1（2026-10-09）</p>
+  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字｜v4.2（2026-10-09）</p>
 </header>
 <div class="card">
   <div class="ch"><div class="num">1</div><span>選擇格式並上傳 Excel</span></div>
   <div class="fmt">
     <button class="on" id="f1" onclick="pickFmt('template')"><b>範本格式</b><small>四個工作表：原追加/原追減/新增/新增不議</small></button>
-    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>變更預算明細表（v1/v2/v3 版型自動偵測，計算同 skill）</small></button>
+    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>變更預算明細表（v1/v2/v3/v5 版型自動偵測，計算同 skill）</small></button>
   </div>
   <div class="drop" id="dz">
     <input type="file" id="fi" accept=".xlsx,.xlsm,.xls" onchange="onFile(event)">
@@ -179,6 +179,8 @@ const V1_HEADERS={'甲':['nochange','原有項目無追加減'],'乙':['add','�
   '丙':['deduct','原有項目追減'],'丁':['new','新增項目'],'戊':['new','新增項目']};
 const V2_RE=/^([A-Z])[.．、]\s*(.+)$/;
 const V3_RE=/^([甲乙丙丁戊])[、.．]\s*(.+)$/;
+// v5（第一二雙溪型）：項次欄只有一個字母 A~E、工項欄是標題；區塊以工項欄「計  (A)」收尾；欄位同 v2
+const V5_KEY_RE=/^[A-E]$/,V5_TOTAL_RE=/^計\s*[(（]/;
 function kindFromTitle(t){
   if(t.includes('無追加減')||t.includes('無增減'))return'nochange';
   if(t.includes('新增'))return'new';
@@ -191,9 +193,10 @@ const NUM_FIELDS=['oq','op','oa','nq','np','na','dq','dp','da'];
 const FLD={oa:'合約金額',na:'變更金額',da:'增減金額'};
 
 function detectLayout(g){
-  let v1=0,v2=0,v3=0;
+  let v1=0,v2=0,v3=0,v5=0;
   for(let r=0;r<g.length;r++){
     if(V1_HEADERS[gStr(g,r,0)])v1++;
+    if(V5_KEY_RE.test(gStr(g,r,1))&&kindFromTitle(gStr(g,r,2)))v5++;
     let m=V2_RE.exec(gStr(g,r,1));
     if(m&&kindFromTitle(m[2]))v2++;
     m=V3_RE.exec(gStr(g,r,2));
@@ -202,6 +205,7 @@ function detectLayout(g){
   if(v1>=2)return['v1',0];
   if(v2>=2)return['v2',1];
   if(v3>=2)return['v3',1];
+  if(v5>=2)return['v5',1];
   return null;
 }
 function pickSheet(wb){
@@ -246,12 +250,13 @@ function isLeafCode(code,all){
 
 function parseGridBudget(g,sheetName){
   const det=detectLayout(g);
-  if(!det)throw new Error('工作表「'+sheetName+'」偵測不到已知版型（甲乙丙丁戊、A.~E. 或 甲、~戊、）');
+  if(!det)throw new Error('工作表「'+sheetName+'」偵測不到已知版型（甲乙丙丁戊、A.~E.、甲、~戊、 或 A｜原契約項目…）');
   const layout=det[0],base=det[1];
   const marks=[];
   for(let r=0;r<g.length;r++){
     if(layout==='v1'){const v=gStr(g,r,base);if(V1_HEADERS[v])marks.push([r,v,V1_HEADERS[v][0],V1_HEADERS[v][1]])}
     else if(layout==='v3'){const m=V3_RE.exec(gStr(g,r,base+COLS.name));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
+    else if(layout==='v5'){const k=gStr(g,r,base),t=gStr(g,r,base+COLS.name);if(V5_KEY_RE.test(k)&&kindFromTitle(t))marks.push([r,k,kindFromTitle(t),t])}
     else{const m=V2_RE.exec(gStr(g,r,base));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
   }
   const budget={layout,base,sheetName,blocks:[],projectName:'',changeLabel:'',formulaInfo:false};
@@ -266,7 +271,10 @@ function parseGridBudget(g,sheetName){
   const totalLabel=layout==='v3'?'小計':'計';
   marks.forEach((mk,i)=>{
     const r0=mk[0],rNext=i+1<marks.length?marks[i+1][0]:g.length;
-    const totalRow=findTotalRow(g,r0,rNext,base,totalLabel);
+    let totalRow=null;
+    if(layout==='v5'){   // 收尾列：項次空、工項欄「計  (A)」；找不到最後一區塊會吃進表尾總計區
+      for(let r=r0+1;r<rNext;r++)if(!gStr(g,r,base)&&V5_TOTAL_RE.test(gStr(g,r,base+COLS.name))){totalRow=r;break}
+    }else totalRow=findTotalRow(g,r0,rNext,base,totalLabel);
     const r1=totalRow!=null?totalRow+1:rNext;
     const blk={key:mk[1],kind:mk[2],title:mk[3],r0,r1,totalRow,negotiated:null,leaves:[],parents:[],specials:{}};
     if(blk.kind==='new')blk.negotiated=!mk[3].includes('不議價');
@@ -299,6 +307,18 @@ function parseGridBudget(g,sheetName){
         if(['012','013','014','0B','0B1'].includes(code)&&!(code in target.specials))target.specials[code]=readRow(g,r,base);
       }
     }
+  }
+  // 015 物價指數調整款：表尾一列（有物調的案子才有）＋緊接的「物價指數調整款-營業稅」列（與 skill 同步）
+  budget.adj015=null;budget.adj015Tax=null;
+  const rTail015=Math.max(...budget.blocks.map(b=>b.r1).concat([0]));
+  for(let r=rTail015;r<g.length;r++){
+    if(gCode(g,r,base)!=='015')continue;
+    budget.adj015=readRow(g,r,base);
+    for(let r2=r+1;r2<Math.min(r+4,g.length);r2++){
+      const nm=gStr(g,r2,base+COLS.name);
+      if(nm.includes('物價')&&nm.includes('營業稅')){budget.adj015Tax=readRow(g,r2,base);break}
+    }
+    break;
   }
   return budget;
 }
@@ -376,6 +396,7 @@ function constList(budget){
       for(const f in lf.consts)
         out.push('Excel第'+(lf.row+1)+'列 '+lf.code+'「'+lf.name+'」'+FLD[f]+' 公式 '+lf.consts[f]+' 加減了常數 → '+
           (lf.code==='012'?'012 間接費吸收尾差（原則④允許），請在簽辦說明寫清楚調了多少、為什麼'
+          :(lf.code==='0B'||lf.code==='0B1')?'營業稅取整或吸收尾差（原則③④允許），請在簽辦說明寫清楚調了多少、為什麼'
                           :'工項不可加減常數湊尾差（常見是為了湊預算系統（AA／XB）的 變更−合約），請拿掉常數；尾差由 012 吸收'));
   return out;
 }
@@ -451,9 +472,14 @@ function summarize(budget){
   S.d012=all.reduce((s,b)=>s+specialDelta(b,'012'),0);
   S.d013=all.reduce((s,b)=>s+specialDelta(b,'013'),0);
   S.d014=all.reduce((s,b)=>s+specialDelta(b,'014'),0);
-  S.sec5=S.d012+S.d013+S.d014;                                // (五) 包工費以外
+  S.has015=!!budget.adj015;
+  S.d015=S.has015?(effDelta(budget.adj015,'add')||0):0;
+  S.d015Tax=budget.adj015Tax?(effDelta(budget.adj015Tax,'add')||0):0;
+  if(S.has015&&!budget.adj015Tax)
+    S.warn.push('有 015 物價指數調整款（Excel第'+(budget.adj015.row+1)+'列），但找不到緊接的「物價指數調整款-營業稅」列，(七) 未含物調營業稅，請確認。');
+  S.sec5=S.d012+S.d013+S.d014+S.d015;                         // (五) 包工費以外（含 015 物調）
   S.sec6=S.sec4+S.sec5;                                       // (六) 未稅
-  S.sec7=all.reduce((s,b)=>s+specialDelta(b,'0B1'),0);        // (七) 0B 營業稅
+  S.sec7=all.reduce((s,b)=>s+specialDelta(b,'0B1'),0)+S.d015Tax; // (七) 0B 營業稅（含物調營業稅）
   S.sec8=S.sec6+S.sec7;                                       // (八) 含稅
   if(Math.abs(S.sec7-S.sec6*0.05)>1.0)
     S.warn.push('0B 營業稅 '+num(S.sec7)+' 與 變更總金額×5% '+num(S.sec6*0.05)+' 差逾 1 元，請確認。');
@@ -539,9 +565,11 @@ function estReport(parsed){
     '　1.項目012，承商利潤及保險費(約包工費10％)，依本次變更後包工費與原包工費（未稅）比例調整，'+sgnWord(S.d012)+'金額'+num(Math.abs(S.d012))+'元。(追加勿逾10%，追減宜多扣)',
     '　2.項目013，勞工安全衛生費用，'+sgnWord(S.d013)+'金額'+num(Math.abs(S.d013))+'元。',
     '　3.項目014，品質管理費及材料檢驗費用，'+sgnWord(S.d014)+'金額'+num(Math.abs(S.d014))+'元。',
-    '　4.小計：'+sgnWord(S.sec5)+num(Math.abs(S.sec5))+'元。',
+    ...(S.has015?['　4.項目015，物價指數調整款，'+sgnWord(S.d015)+'金額'+num(Math.abs(S.d015))+'元。']:[]),
+    '　'+(S.has015?5:4)+'.小計：'+sgnWord(S.sec5)+num(Math.abs(S.sec5))+'元。',
     '(六) 變更總金額：(四)+(五)='+sgnWord(S.sec6)+'金額'+num(Math.abs(S.sec6))+'元（未稅）。',
-    '(七) 變更0B營業稅(約發包工程費5％)：'+sgnWord(S.sec7)+'金額'+num(Math.abs(S.sec7))+'元。',
+    '(七) 變更0B營業稅(約發包工程費5％)：'+sgnWord(S.sec7)+'金額'+num(Math.abs(S.sec7))+'元'+
+      (S.d015Tax?'（含物價指數調整款營業稅'+sgnWord(S.d015Tax)+num(Math.abs(S.d015Tax))+'元）':'')+'。',
     '(八) 本次變更最終變更金額（不包含原契約金額）：變更總金額(六)+變更0B營業稅(七)='+sgnWord(S.sec8)+'金額'+num(Math.abs(S.sec8))+'元（含稅）。'
   ];
   groups.push({title:'(四)~(八) 金額變更彙總（表列小計優先，同 skill 產簽邏輯）',cls:'shd',n:null,lines:chain});
@@ -598,7 +626,7 @@ function parseTemplate(wb){
 // ================================================================
 function parseEstimate(wb,isXlsx){
   const pick=pickSheet(wb);
-  if(!pick)throw new Error('所有工作表都偵測不到已知版型（甲乙丙丁戊、A.~E. 或 甲、~戊、）。請確認是「變更預算明細表」；新版型請依 skill 的 docs/FORMATS.md 流程處理，不要手抄數字。');
+  if(!pick)throw new Error('所有工作表都偵測不到已知版型（甲乙丙丁戊、A.~E.、甲、~戊、 或 A｜原契約項目…）。請確認是「變更預算明細表」；新版型請依 skill 的 docs/FORMATS.md 流程處理，不要手抄數字。');
   const budget=parseGridBudget(pick.grid.vals,pick.name);
   if(isXlsx){budget.formulaInfo=true;annotateManual(budget,pick.grid.kinds);annotateConsts(budget,pick.grid.forms)}
   const parsed={mode:'budget',budget,S:summarize(budget)};

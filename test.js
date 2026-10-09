@@ -128,6 +128,35 @@ eq('常數 regex 不抓位址／ROUND 位數／費率',
   P.formulaConsts('ROUNDDOWN(I12*J12,2)').length + P.formulaConsts('H12+N12-K12').length +
   P.formulaConsts('L5*M5*1.05').length, 0);
 
+// ---- v5 版型（第一二雙溪型：項次欄單一字母、工項欄標題、「計  (A)」收尾） ----
+console.log('\n[v5 版型]');
+const R5 = (code, name, n) => [null, code, name, '', 'M'].concat(n || []);
+const aoa = [
+  [null, '項次', '工程項目'],
+  R5('A', '原契約項目無增減部份'),
+  R5('01111', '無異動', [1, 5, 5, 1, 5, 5, 0, 5, 0]),
+  R5('', '計  (A)'),
+  R5('B', '原契約項目追加部份'),
+  R5('01133', '鋼筋', [2, 10, 20, 3, 10, 30, 1, 10, 10]),
+  R5('011', '包工費  (B)', [1, null, 20, 1, null, 30, null, null, 10]),
+  R5('', '計  (B)'),
+  R5('C', '原契約項目追減部份'),
+  R5('011GC', '門禁管制', [10, 100, 1000, 9, 100, 900, -1, 100, -100]),
+  R5('011', '包工費  (C)', [1, null, 1000, 1, null, 900, null, null, -100]),
+  R5('', '計  (C)'),
+  R5('011', '包工費(A+B+C+D)', [1, null, 1020, 1, null, 930, null, null, -90]),
+  R5('015', '物價指數調整款', [1, null, 50, 1, null, 45, null, null, -5]),
+];
+const wb5 = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb5, XLSX.utils.aoa_to_sheet(aoa), '明細表');
+const e5 = P.parseEstimate(wb5, false);
+eq('v5 版型偵測', e5.budget.layout, 'v5');
+eq('v5 區塊 A/B/C', e5.budget.blocks.map(b => b.key + b.kind).join(','), 'Anochange,Badd,Cdeduct');
+eq('v5 最後區塊在「計  (C)」截止（表尾 015 不入 leaf）', e5.budget.blocks[2].leaves.map(l => l.code).join(), '011GC');
+eq('v5 追減小計取區塊內那一列', e5.S.ded_011, -100);
+eq('015 物調進 (五)', e5.S.has015 && e5.S.d015 === -5, true);
+eq('(五) 列出 015 並接續編號', e5.report.groups.find(g => g.title.startsWith('(四)')).lines.some(l => l.startsWith('　4.項目015')), true);
+
 // ---- 句型 fmtSec（對齊 v5 範本：單價/新增單價帶「元」、數量帶單位、小計行） ----
 console.log('\n[句型 fmtSec]');
 const fa = P.fmtSec('add', [{code:'A101', name:'排水溝', origQty:'10', unit:'M', price:1000, qty:2, amt:2000}]);
