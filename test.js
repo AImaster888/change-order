@@ -23,7 +23,7 @@ const block = html.split(START)[1].split(END)[0];
 let P;
 try {
   const factory = new Function('XLSX',
-    block + '\n;return {parseTemplate,parseEstimate,fmtSec,FN,N,num,trunc2,effDelta,leafIssues};');
+    block + '\n;return {parseTemplate,parseEstimate,fmtSec,FN,N,num,trunc2,trunc2z,lxm,kh,formulaConsts,erpDiffs,effDelta,leafIssues};');
   P = factory(XLSX);
 } catch (e) {
   console.error('✗ PARSER CORE 抽出後無法執行（可能語法錯誤或引用了 DOM）：', e.message);
@@ -103,6 +103,30 @@ eq('無條件捨去', P.trunc2(123.456), 123.45);
 eq('浮點雜訊先吸收再截斷', P.trunc2(3 * 2575.4), 7726.2);
 eq('effDelta 增減欄優先', P.effDelta({ da: -5, na: 100, oa: 90 }, 'add'), -5);
 eq('effDelta 新增合約側視為0', P.effDelta({ da: null, na: 500, oa: null }, 'new'), 500);
+
+// ---- 增減金額以簽為準 L×M（skill DECISIONS #30，2026-10-09） ----
+console.log('\n[以簽為準 L×M / 公式藏常數 / ERP 尾差]');
+eq('trunc2z 負數往 0 截（＝ROUNDDOWN）', P.trunc2z(-12.345), -12.34);
+eq('trunc2 負數仍往下（金額鏈不變）', P.trunc2(-12.345), -12.35);
+// 示意數字：12→15.7×100.37；變更金額 1,575.809 用 ROUND 填 1,575.81 → L×M 與 K−H 差 0.01
+const steel = {row: 9, code: 'T0001', name: '示意工項', errors: [], oq: 12, op: 100.37, oa: 1204.44,
+  nq: 15.7, np: 100.37, na: 1575.81, dq: 3.7, dp: 100.37, da: 371.36};
+eq('示意工項 L×M＝371.36', P.lxm(steel, 'add'), 371.36);
+eq('示意工項 ERP K−H＝371.37', P.kh(steel, 'add'), 371.37);
+eq('表填＝L×M 不標增減紅字', P.leafIssues(steel, 'add').some(s => s.includes('增減金額')), false);
+const bent = Object.assign({}, steel, {da: 371.37});
+const bi = P.leafIssues(bent, 'add').filter(s => s.includes('增減金額'));
+eq('表填＝K−H 標紅字並加註疑似湊 ERP', bi.length === 1 && bi[0].includes('疑似為湊 ERP') && bi[0].includes('＝增減數量'), true);
+eq('增減欄空白用 L×M 推算', P.effDelta(Object.assign({}, steel, {da: null}), 'add'), 371.36);
+const ed = P.erpDiffs({blocks: [{kind: 'add', leaves: [Object.assign({cat: '011'}, bent)]}]});
+eq('ERP 尾差用規則值 L×M 比，列 +0.01', ed.items.length === 1 && ed.big === 0 && Math.abs(ed.total['011'] - 0.01) < 1e-9, true);
+const ed2 = P.erpDiffs({blocks: [{kind: 'add', leaves: [Object.assign({cat: '011'}, steel, {na: 1577.81})]}]});
+eq('ERP 差 ≥1 元不算尾差、另計項數', ed2.items.length === 0 && ed2.big === 1, true);
+eq('常數 regex 抓 +0.01', P.formulaConsts('ROUND(L12*M12,2)+0.01').join(), '+0.01');
+eq('常數 regex 抓 012 的 −0.3', P.formulaConsts('=K20*0.1-0.3').join(), '-0.3');
+eq('常數 regex 不抓位址／ROUND 位數／費率',
+  P.formulaConsts('ROUNDDOWN(I12*J12,2)').length + P.formulaConsts('H12+N12-K12').length +
+  P.formulaConsts('L5*M5*1.05').length, 0);
 
 // ---- 句型 fmtSec（對齊 v5 範本：單價/新增單價帶「元」、數量帶單位、小計行） ----
 console.log('\n[句型 fmtSec]');

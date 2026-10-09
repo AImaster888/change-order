@@ -1,4 +1,5 @@
 {
+  "version": "4.1.0",
   "scripts": {
     "test": "node test.js",
     "make-fixture": "node test/make-fixture.js"
