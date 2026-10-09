@@ -54,7 +54,7 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
 <div class="wrap">
 <header>
   <h1>工程契約變更工項擷取工具</h1>
-  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字｜v4.2（2026-10-09）</p>
+  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字｜v4.3（2026-10-10）</p>
 </header>
 <div class="card">
   <div class="ch"><div class="num">1</div><span>選擇格式並上傳 Excel</span></div>
@@ -91,10 +91,10 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
       <li><b>工項小計</b>：單價×數量所得金額，小數點二位以下<b>無條件捨去</b>（本工具逐項重算，表填與實算不符即紅字標註，不代改數字）。</li>
       <li><b>追加、追減及新增工項</b>：各類別分別加總後，小數點二位以下無條件捨去（各項已取 2 位，相加不生第 3 位；本工具逐項加總對照表列小計，差異紅字提醒）。</li>
       <li><b>契約總價</b>：管理費、營業利潤、保險費及其他間接費用依契約約定計算，最終契約金額以<b>整數元</b>表示（承辦人於 Excel 端辦理；本工具不重算間接費，012/013/014/0B 一律引用表列值）。</li>
-      <li><b>尾差調整</b>：小數點處理產生之尾差，於營業利潤或保險費等<b>間接費用內吸收</b>，不調整直接工程費之單價或數量（本工具唯讀；營業稅與變更總金額×5% 差逾 1 元時警告提醒）。</li>
-      <li><b>增減金額以簽為準</b>：增減金額＝<b>增減數量×單價</b>，小數點二位以下無條件捨去（追減的負數也直接捨去尾數，同 Excel ROUNDDOWN）。公司預算系統（AA／XB）是用「變更後金額−原金額」，兩者會差幾分錢，屬正常尾差：<b>不可為了湊預算系統改工項公式</b>（如 +0.01），尾差由 012 吸收；預算系統對不上時另簽修正。本工具會把表填恰等於預算系統算法的格子加註「疑似為了湊預算系統」、把金額公式裡加減的常數點名，並在「預算系統可能差額」列出兩種算法的尾差，由承辦人判斷。</li>
+      <li><b>差額調整</b>：小數點處理產生之差額，<b>透過 012 承商利潤及保險費調整收掉</b>（10% 上限內可彈性調整）；0B 營業稅一律為整數，於 5% 以內取約去掉小數；不調整直接工程費之單價或數量（本工具唯讀；營業稅與變更總金額×5% 差逾 1 元時警告提醒）。</li>
+      <li><b>增減金額以簽為準</b>：增減金額＝<b>增減數量×單價</b>，小數點二位以下無條件捨去（追減的負數也直接捨去尾數，同 Excel ROUNDDOWN）。公司預算系統（AA／XB）是用「變更後金額−原金額」，兩者會差 0.0x 元，屬正常取位差額：<b>不可為了湊預算系統改工項公式</b>（如 +0.01），差額透過 012 承商利潤及保險費調整收掉；預算系統對不上時另簽修正。本工具會把表填恰等於預算系統算法的格子加註「疑似為了湊預算系統」、把金額公式裡加減的常數點名，並在「預算系統可能差額」列出兩種算法的差額，由承辦人判斷。</li>
     </ol>
-    <p style="margin-top:.6rem;color:var(--mut)">結論：統一小數點處理原則、固定由間接費用吸收尾差，可降低契約變更審查爭議，亦有利於後續結算及審計查核。</p>
+    <p style="margin-top:.6rem;color:var(--mut)">結論：統一小數點處理原則、固定透過 012 承商利潤及保險費收差額，可降低契約變更審查爭議，亦有利於後續結算及審計查核。</p>
   </details>
 </div>
 </div>
@@ -333,7 +333,7 @@ function annotateManual(budget,kinds){
       }
 }
 
-// 公式裡被加減的數字常數（+0.01 湊尾差、012 的 −0.3、整格寫死的 =-1234.5）；
+// 公式裡被加減的數字常數（+0.01 湊差額、012 的 −0.3、整格寫死的 =-1234.5）；
 // 後面接 * / ^ 的是費率等運算元不算；ROUND(…,2) 的位數、儲存格位址都不會被抓
 const CONST_RE=/[+\-]\s*\d+(?:\.\d+)?(?![\d.]*\s*[*/^])/g;
 function formulaConsts(t){return(String(t).replace(/^=/,'').match(CONST_RE)||[]).map(s=>s.replace(/\s/g,''))}
@@ -383,7 +383,7 @@ function leafIssues(lf,kind){
       let m='增減金額 表填 '+num(lf.da)+'，實算 '+num(exp)+'＝增減數量 '+num(parts[0])+'×單價 '+num(parts[1])+' 小數2位以下捨去（簽以數量×單價為準）';
       const erp=kh(lf,kind);
       if(erp!=null&&Math.abs(lf.da-erp)<=TOL_EXACT)
-        m+='；表填值剛好等於預算系統（AA／XB）的算法（變更後金額−原金額）＝'+num(erp)+'，疑似為了湊預算系統的金額而改，請改回 =ROUNDDOWN(增減數量×單價,2)，差額屬正常尾差由 012 吸收';
+        m+='；表填值剛好等於預算系統（AA／XB）的算法（變更後金額−原金額）＝'+num(erp)+'，疑似為了湊預算系統的金額而改，請改回 =ROUNDDOWN(增減數量×單價,2)，差額屬正常取位差，透過 012 承商利潤及保險費調整收掉';
       iss.push(m);
     }
   }
@@ -395,13 +395,13 @@ function constList(budget){
     for(const lf of blk.leaves.concat(blk.parents,Object.values(blk.specials)))
       for(const f in lf.consts)
         out.push('Excel第'+(lf.row+1)+'列 '+lf.code+'「'+lf.name+'」'+FLD[f]+' 公式 '+lf.consts[f]+' 加減了常數 → '+
-          (lf.code==='012'?'012 間接費吸收尾差（原則④允許），請在簽辦說明寫清楚調了多少、為什麼'
-          :(lf.code==='0B'||lf.code==='0B1')?'營業稅取整或吸收尾差（原則③④允許），請在簽辦說明寫清楚調了多少、為什麼'
-                          :'工項不可加減常數湊尾差（常見是為了湊預算系統（AA／XB）的 變更−合約），請拿掉常數；尾差由 012 吸收'));
+          (lf.code==='012'?'012 承商利潤及保險費在 10% 上限內調整收差額（原則④允許），請在簽辦說明寫清楚調了多少、為什麼'
+          :(lf.code==='0B'||lf.code==='0B1')?'營業稅取整數（5% 以內取約去掉小數，原則③允許），請在簽辦說明寫清楚調了多少、為什麼'
+                          :'工項不可加減常數湊差額（常見是為了湊預算系統（AA／XB）的 變更−合約），請拿掉常數；差額透過 012 承商利潤及保險費調整收掉'));
   return out;
 }
-// 簽（L×M）與預算系統（AA／XB）（K−H）的取位尾差：用規則值 L×M 比，不用表填（表填錯已在紅字報過）；
-// 差 ≥1 元依 SOP 3.1 不是尾差，只計項數
+// 簽（L×M）與預算系統（AA／XB）（K−H）的取位差額：用規則值 L×M 比，不用表填（表填錯已在紅字報過）；
+// 差 ≥1 元依 SOP 3.1 不是取位差額，只計項數
 function erpDiffs(budget){
   const total={},items=[];let big=0;
   for(const blk of budget.blocks){
@@ -582,9 +582,9 @@ function estReport(parsed){
   const ed=erpDiffs(budget);
   if(ed.items.length||ed.big){
     const el=[];
-    if(ed.big)el.push('另有 '+ed.big+' 項兩種算法差 ≥ 1 元：不是尾差，是數量、單價或金額填錯，請看上方紅字。');
+    if(ed.big)el.push('另有 '+ed.big+' 項兩種算法差 ≥ 1 元：不是取位差額，是數量、單價或金額填錯，請看上方紅字。');
     ed.items.forEach(({lf,s,e})=>el.push('Excel第'+(lf.row+1)+'列 '+lf.code+'「'+lf.name+'」簽 '+num(s)+'　預算系統（AA／XB） '+num(e)+'　差 '+(e-s>=0?'+':'')+num(e-s)));
-    if(ed.items.length)el.push('類別合計：'+Object.keys(ed.total).sort().map(c=>c+' 差 '+(ed.total[c]>=0?'+':'')+num(ed.total[c])).join('；')+'。預算系統（AA／XB）算出來跟簽的金額不同時，另簽修正，以尾差由 012 吸收。');
+    if(ed.items.length)el.push('類別合計：'+Object.keys(ed.total).sort().map(c=>c+' 差 '+(ed.total[c]>=0?'+':'')+num(ed.total[c])).join('；')+'。預算系統（AA／XB）算出來跟簽的金額不同時，另簽修正，差額透過 012 承商利潤及保險費調整收掉。');
     groups.push({title:'預算系統（AA／XB）可能差額（參考：簽以數量×單價為準，預算系統以變更後−原金額計算，差額由承辦人判斷）',cls:'shg',n:ed.items.length,lines:el});
   }
   return{groups,counts:{add:addL.length,ded:dedL.length,nego:negoN,noNego:noNegoN},final:chain[chain.length-1]};
