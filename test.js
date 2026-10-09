@@ -100,28 +100,28 @@ eq('手動填值指向第9列變更金額', gw.lines[0].includes('第9列') && g
 // ---- 計算原則單點測試（DECISIONS #14/#25：取 2 位無條件捨去）----
 console.log('\n[計算原則 trunc2 / effDelta]');
 eq('無條件捨去', P.trunc2(123.456), 123.45);
-eq('浮點雜訊先吸收再截斷', P.trunc2(3 * 2575.4), 7726.2);
+eq('浮點雜訊先吸收再捨去', P.trunc2(3 * 2575.4), 7726.2);
 eq('effDelta 增減欄優先', P.effDelta({ da: -5, na: 100, oa: 90 }, 'add'), -5);
 eq('effDelta 新增合約側視為0', P.effDelta({ da: null, na: 500, oa: null }, 'new'), 500);
 
 // ---- 增減金額以簽為準 L×M（skill DECISIONS #30，2026-10-09） ----
-console.log('\n[以簽為準 L×M / 公式藏常數 / ERP 尾差]');
-eq('trunc2z 負數往 0 截（＝ROUNDDOWN）', P.trunc2z(-12.345), -12.34);
+console.log('\n[以簽為準 L×M / 公式藏常數 / 預算系統（AA／XB）尾差]');
+eq('trunc2z 負數也直接捨去尾數（＝ROUNDDOWN）', P.trunc2z(-12.345), -12.34);
 eq('trunc2 負數仍往下（金額鏈不變）', P.trunc2(-12.345), -12.35);
 // 示意數字：12→15.7×100.37；變更金額 1,575.809 用 ROUND 填 1,575.81 → L×M 與 K−H 差 0.01
 const steel = {row: 9, code: 'T0001', name: '示意工項', errors: [], oq: 12, op: 100.37, oa: 1204.44,
   nq: 15.7, np: 100.37, na: 1575.81, dq: 3.7, dp: 100.37, da: 371.36};
 eq('示意工項 L×M＝371.36', P.lxm(steel, 'add'), 371.36);
-eq('示意工項 ERP K−H＝371.37', P.kh(steel, 'add'), 371.37);
+eq('示意工項 預算系統（AA／XB）K−H＝371.37', P.kh(steel, 'add'), 371.37);
 eq('表填＝L×M 不標增減紅字', P.leafIssues(steel, 'add').some(s => s.includes('增減金額')), false);
 const bent = Object.assign({}, steel, {da: 371.37});
 const bi = P.leafIssues(bent, 'add').filter(s => s.includes('增減金額'));
-eq('表填＝K−H 標紅字並加註疑似湊 ERP', bi.length === 1 && bi[0].includes('疑似為湊 ERP') && bi[0].includes('＝增減數量'), true);
+eq('表填＝K−H 標紅字並加註疑似湊預算系統（AA／XB）', bi.length === 1 && bi[0].includes('疑似為了湊預算系統') && bi[0].includes('＝增減數量'), true);
 eq('增減欄空白用 L×M 推算', P.effDelta(Object.assign({}, steel, {da: null}), 'add'), 371.36);
 const ed = P.erpDiffs({blocks: [{kind: 'add', leaves: [Object.assign({cat: '011'}, bent)]}]});
-eq('ERP 尾差用規則值 L×M 比，列 +0.01', ed.items.length === 1 && ed.big === 0 && Math.abs(ed.total['011'] - 0.01) < 1e-9, true);
+eq('預算系統（AA／XB）尾差用規則值 L×M 比，列 +0.01', ed.items.length === 1 && ed.big === 0 && Math.abs(ed.total['011'] - 0.01) < 1e-9, true);
 const ed2 = P.erpDiffs({blocks: [{kind: 'add', leaves: [Object.assign({cat: '011'}, steel, {na: 1577.81})]}]});
-eq('ERP 差 ≥1 元不算尾差、另計項數', ed2.items.length === 0 && ed2.big === 1, true);
+eq('預算系統（AA／XB）差 ≥1 元不算尾差、另計項數', ed2.items.length === 0 && ed2.big === 1, true);
 eq('常數 regex 抓 +0.01', P.formulaConsts('ROUND(L12*M12,2)+0.01').join(), '+0.01');
 eq('常數 regex 抓 012 的 −0.3', P.formulaConsts('=K20*0.1-0.3').join(), '-0.3');
 eq('常數 regex 不抓位址／ROUND 位數／費率',
