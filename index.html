@@ -29,6 +29,17 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
 .drop p{font-size:.88rem;color:var(--mut)}
 .info{display:none;padding:.5rem .8rem;background:#f0f7f0;border-radius:6px;font-size:.82rem;color:var(--ok);margin-top:.8rem}
 .err{display:none;padding:.5rem .8rem;background:#fde8e8;border-radius:6px;font-size:.82rem;color:var(--red);margin-top:.8rem;white-space:pre-wrap}
+.help{display:none;padding:.9rem 1rem;background:#fff8e6;border:1px solid #f0c36d;border-radius:6px;font-size:.84rem;margin-top:.8rem;line-height:1.8}
+.help h4{color:#8a5a00;font-size:.95rem;margin-bottom:.4rem}.help p{margin:.35rem 0}
+.help ol,.guide ul{margin:.3rem 0 .3rem 1.4rem}.help li,.guide li{margin:.25rem 0}
+.help .note,.guide p{color:var(--mut)}
+.btn.sm{padding:.15rem .6rem;font-size:.78rem;vertical-align:baseline}
+.guide{margin-top:1rem;font-size:.82rem;border-top:1px dashed var(--border);padding-top:.7rem}
+.guide summary{cursor:pointer;font-weight:500;color:var(--pri)}
+.guide p{margin:.5rem 0 .3rem}
+.cols{border-collapse:collapse;font-size:.76rem;width:100%;margin:.3rem 0}
+.cols th,.cols td{border:1px solid var(--border);padding:.2rem .4rem;text-align:center}
+.cols th{background:#eef3f8;color:var(--pri)}
 #out{display:none}
 .tags{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
 .tag{padding:.3rem .7rem;border-radius:4px;font-size:.78rem;font-weight:500}
@@ -54,13 +65,13 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
 <div class="wrap">
 <header>
   <h1>工程契約變更工項擷取工具</h1>
-  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字｜v4.3（2026-10-10）</p>
+  <p>從 Excel 預算書自動擷取追加、追減、新增工項，產出格式化文字｜v4.4（2026-11-09）</p>
 </header>
 <div class="card">
   <div class="ch"><div class="num">1</div><span>選擇格式並上傳 Excel</span></div>
   <div class="fmt">
     <button class="on" id="f1" onclick="pickFmt('template')"><b>範本格式</b><small>四個工作表：原追加/原追減/新增/新增不議</small></button>
-    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>變更預算明細表（v1/v2/v3/v5 版型自動偵測，計算同 skill）</small></button>
+    <button id="f2" onclick="pickFmt('estimate')"><b>概算書格式</b><small>變更預算明細表（v1/v2/v3/v5/v8 版型自動偵測，計算同 skill）</small></button>
   </div>
   <div class="drop" id="dz">
     <input type="file" id="fi" accept=".xlsx,.xlsm,.xls" onchange="onFile(event)">
@@ -69,6 +80,19 @@ header p{font-size:.82rem;color:var(--mut);margin-top:.2rem}
   </div>
   <div class="info" id="info"></div>
   <div class="err" id="err"></div>
+  <div class="help" id="help"></div>
+  <details class="guide">
+    <summary>怎麼選格式？版型認不得怎麼辦？</summary>
+    <ul>
+      <li><b>概算書格式（建議先用這個）</b>：直接上傳整本「工程變更預算書」，工具自動找「變更預算明細表」分頁、偵測版型，逐項驗算並產 (一)~(八) 金額鏈。</li>
+      <li><b>範本格式（備援）</b>：明細表版型工具認不得時，把增減工項整理成 4 個工作表 <b>原追加／原追減／新增／新增不議</b> 再上傳，只產 (一)~(四) 工項文字。</li>
+    </ul>
+    <p><b>範本格式欄位</b>（每個工作表相同，第 1 列標題、第 2 列起資料、中間不要空列）：</p>
+    <table class="cols"><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th></tr>
+      <tr><td>序號</td><td>項次</td><td>工項名稱</td><td>原契約數量</td><td>單位</td><td>單價</td><td>增減數量</td><td>增減金額</td></tr>
+      <tr><td>1</td><td>0111</td><td>舖設軌道</td><td>2030</td><td>M</td><td>4000</td><td>60</td><td>240000</td></tr></table>
+    <p><button class="btn bo sm" onclick="dlTemplate()">⬇ 下載範本格式空白檔</button>　追減的數量、金額填負數；「式」計價的工項不檢查單價×數量。</p>
+  </details>
 </div>
 <div id="out">
   <div class="card">
@@ -107,7 +131,44 @@ let fmt='template', res=null;
 function pickFmt(f){fmt=f;document.getElementById('f1').classList.toggle('on',f==='template');document.getElementById('f2').classList.toggle('on',f==='estimate')}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2500)}
 function showErr(m){const e=document.getElementById('err');e.textContent=m;e.style.display='block'}
-function reset(){document.getElementById('out').style.display='none';document.getElementById('fi').value='';document.getElementById('info').style.display='none';document.getElementById('err').style.display='none';res=null}
+function reset(){document.getElementById('out').style.display='none';document.getElementById('fi').value='';document.getElementById('info').style.display='none';document.getElementById('err').style.display='none';hideHelp();res=null}
+// ---- 解析不了時的引導（版型不認得 → 改用範本格式）----
+const TPL_SHEETS=['原追加','原追減','新增','新增不議'];
+const TPL_HEAD=['序號','項次','工項名稱','原契約數量','單位','單價','數量','金額'];
+function escH(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function showHelp(h){const e=document.getElementById('help');e.innerHTML=h;e.style.display='block';e.scrollIntoView({behavior:'smooth',block:'nearest'})}
+function hideHelp(){document.getElementById('help').style.display='none'}
+function sheetList(names){return names.map(n=>'「'+escH(n.trim())+'」').join('、')}
+const TPL_STEPS=
+  '<ol>'+
+  '<li>按 <button class="btn bo sm" onclick="dlTemplate()">⬇ 下載範本格式空白檔</button>（已建好 4 個工作表與標題列）。</li>'+
+  '<li>打開預算書的明細表，把「<b>比較增減</b>」有數字的工項，依性質貼到對應工作表：'+
+  '<b>原追加</b>（原有項目追加）、<b>原追減</b>（原有項目追減，數量和金額填負數）、<b>新增</b>（新增項目、須議價）、<b>新增不議</b>（新增不議價，沒有可不填）。</li>'+
+  '<li>每列依欄位填：A 序號｜B 項次｜C 工項名稱｜D 原契約數量｜E 單位｜F 單價｜G 增減數量｜H 增減金額。從第 2 列開始連續填，<b>中間不要空列</b>（遇到整列空白就停止讀取）。</li>'+
+  '<li>按上方 <button class="btn bo sm" onclick="pickFmt(\'template\');hideHelp();toast(\'已切換為範本格式，請重新上傳\')">切換到範本格式</button>，再上傳整理好的檔案。</li>'+
+  '</ol>';
+function helpNoLayout(sheets){
+  const isTpl=TPL_SHEETS.some(n=>sheets.includes(n));
+  if(isTpl)return '<h4>這份檔案是「範本格式」</h4><p>檔內有 '+sheetList(TPL_SHEETS.filter(n=>sheets.includes(n)))+' 工作表，請按 '+
+    '<button class="btn bo sm" onclick="pickFmt(\'template\');hideHelp();toast(\'已切換為範本格式，請重新上傳\')">切換到範本格式</button> 後重新上傳。</p>';
+  return '<h4>⚠ 這份明細表的版型，工具還認不得</h4>'+
+    '<p>檔內工作表：'+sheetList(sheets)+'。工具目前認得 v1/v2/v3/v5/v8 五種「變更預算明細表」版型，這份的區塊標題（甲乙丙丁、A~E 等）位置或寫法不一樣，所以抓不到工項。</p>'+
+    '<p><b>先確認</b>：上傳的是「變更預算明細表」（有 原合約／變更預算／比較增減 三組 數量‧單價‧金額 欄）嗎？是封面、單價分析表或數量計算表就會失敗。</p>'+
+    '<p><b>急著用：改用「範本格式」手動整理</b></p>'+TPL_STEPS+
+    '<p class="note">注意：範本格式只產 (一)~(四) 工項文字，<b>沒有</b> 012/013/014/0B 金額鏈和逐項驗算；手抄後請逐項核對數字。'+
+    '長期做法：把原檔交給維護者新增版型支援（skill change-budget-verify 的 docs/FORMATS.md 流程），之後就能直接用概算書格式。</p>';
+}
+function helpNoTemplate(sheets){
+  return '<h4>⚠ 找不到範本格式的工作表</h4>'+
+    '<p>範本格式要有 '+sheetList(TPL_SHEETS)+' 工作表（名稱一字不差），這份檔案只有：'+sheetList(sheets)+'。</p>'+
+    '<p>如果這是「變更預算明細表」，請按 <button class="btn bo sm" onclick="pickFmt(\'estimate\');hideHelp();toast(\'已切換為概算書格式，請重新上傳\')">切換到概算書格式</button> 後重新上傳（有完整驗算）。</p>'+
+    '<p>要用範本格式，請照下列步驟整理：</p>'+TPL_STEPS;
+}
+function dlTemplate(){
+  const wb=XLSX.utils.book_new();
+  TPL_SHEETS.forEach(n=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([TPL_HEAD]),n));
+  XLSX.writeFile(wb,'契約變更-範本格式空白檔.xlsx');
+}
 const dz=document.getElementById('dz');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over')});
 dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
@@ -181,6 +242,8 @@ const V2_RE=/^([A-Z])[.．、]\s*(.+)$/;
 const V3_RE=/^([甲乙丙丁戊])[、.．]\s*(.+)$/;
 // v5（第一二雙溪型）：項次欄只有一個字母 A~E、工項欄是標題；區塊以工項欄「計  (A)」收尾；欄位同 v2
 const V5_KEY_RE=/^[A-E]$/,V5_TOTAL_RE=/^計\s*[(（]/;
+// v8（集集支線型）：v3 式「甲、…」標題寫在工項欄 B 欄、項次在 A 欄；每區自帶 計(011)/012/01/0B，以「合計」收尾
+const V8_011_RE=/^計\s*[(（]\s*011\s*[)）]/;
 function kindFromTitle(t){
   if(t.includes('無追加減')||t.includes('無增減'))return'nochange';
   if(t.includes('新增'))return'new';
@@ -193,8 +256,10 @@ const NUM_FIELDS=['oq','op','oa','nq','np','na','dq','dp','da'];
 const FLD={oa:'合約金額',na:'變更金額',da:'增減金額'};
 
 function detectLayout(g){
-  let v1=0,v2=0,v3=0,v5=0;
+  let v1=0,v2=0,v3=0,v5=0,v8=0;
   for(let r=0;r<g.length;r++){
+    const m8=V3_RE.exec(gStr(g,r,1));
+    if(m8&&kindFromTitle(m8[2]))v8++;
     if(V1_HEADERS[gStr(g,r,0)])v1++;
     if(V5_KEY_RE.test(gStr(g,r,1))&&kindFromTitle(gStr(g,r,2)))v5++;
     let m=V2_RE.exec(gStr(g,r,1));
@@ -206,6 +271,7 @@ function detectLayout(g){
   if(v2>=2)return['v2',1];
   if(v3>=2)return['v3',1];
   if(v5>=2)return['v5',1];
+  if(v8>=2)return['v8',0];
   return null;
 }
 function pickSheet(wb){
@@ -250,12 +316,12 @@ function isLeafCode(code,all){
 
 function parseGridBudget(g,sheetName){
   const det=detectLayout(g);
-  if(!det)throw new Error('工作表「'+sheetName+'」偵測不到已知版型（甲乙丙丁戊、A.~E.、甲、~戊、 或 A｜原契約項目…）');
+  if(!det)throw new Error('工作表「'+sheetName+'」偵測不到已知版型（甲乙丙丁戊、A.~E.、甲、~戊、A｜原契約項目… 或 B欄 甲、~丁、）');
   const layout=det[0],base=det[1];
   const marks=[];
   for(let r=0;r<g.length;r++){
     if(layout==='v1'){const v=gStr(g,r,base);if(V1_HEADERS[v])marks.push([r,v,V1_HEADERS[v][0],V1_HEADERS[v][1]])}
-    else if(layout==='v3'){const m=V3_RE.exec(gStr(g,r,base+COLS.name));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
+    else if(layout==='v3'||layout==='v8'){const m=V3_RE.exec(gStr(g,r,base+COLS.name));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
     else if(layout==='v5'){const k=gStr(g,r,base),t=gStr(g,r,base+COLS.name);if(V5_KEY_RE.test(k)&&kindFromTitle(t))marks.push([r,k,kindFromTitle(t),t])}
     else{const m=V2_RE.exec(gStr(g,r,base));if(m&&kindFromTitle(m[2]))marks.push([r,m[1],kindFromTitle(m[2]),m[2]])}
   }
@@ -268,7 +334,7 @@ function parseGridBudget(g,sheetName){
       const m=/第\s*\S+\s*次?\s*變更/.exec(t);
       if(m&&!budget.changeLabel)budget.changeLabel=m[0].replace(/\s+/g,'');
     }
-  const totalLabel=layout==='v3'?'小計':'計';
+  const totalLabel=layout==='v3'?'小計':layout==='v8'?'合計':'計';
   marks.forEach((mk,i)=>{
     const r0=mk[0],rNext=i+1<marks.length?marks[i+1][0]:g.length;
     let totalRow=null;
@@ -285,7 +351,8 @@ function parseGridBudget(g,sheetName){
       const code=gCode(g,r,base);
       if(!code)continue;
       const row=readRow(g,r,base);
-      if(['011','012','013','014','01','0B','0B1'].includes(code)&&!(code in blk.specials))blk.specials[code]=row;
+      if(['011','012','013','014','01','0B','0B1'].includes(code)&&!(code in blk.specials)
+        &&!(layout==='v8'&&code==='011'))blk.specials[code]=row;   // v8 的 011 是無金額表頭列
       if(isLeafCode(code,codesBlk)){
         // v3 區塊內全是包工費工項；v1/v2 依代碼前綴分 011/013/014
         row.cat=layout==='v3'?'011':(code.startsWith('013')?'013':code.startsWith('014')?'014':'011');
@@ -293,6 +360,9 @@ function parseGridBudget(g,sheetName){
       }else if(!TOTAL_CODES.has(code)){
         blk.parents.push(row);   // 有子項的大項：不進金額鏈，供大項對照
       }
+    }
+    if(layout==='v8'){   // v8 包工費小計＝項次空、工項欄「計(011)」那一列
+      for(let r=r0+1;r<r1;r++)if(!gStr(g,r,base)&&V8_011_RE.test(gStr(g,r,base+COLS.name))){blk.specials['011']=readRow(g,r,base);break}
     }
     if(layout==='v3'&&totalRow!=null&&!('011'in blk.specials))blk.specials['011']=readRow(g,totalRow,base);
     budget.blocks.push(blk);
@@ -622,11 +692,14 @@ function parseTemplate(wb){
 }
 
 // ================================================================
-// 格式 B：變更預算明細表（v1/v2/v3 版型偵測＋結構化取項，整套對齊 skill budget_parser）
+// 格式 B：變更預算明細表（v1/v2/v3/v5/v8 版型偵測＋結構化取項，整套對齊 skill budget_parser）
 // ================================================================
 function parseEstimate(wb,isXlsx){
   const pick=pickSheet(wb);
-  if(!pick)throw new Error('所有工作表都偵測不到已知版型（甲乙丙丁戊、A.~E.、甲、~戊、 或 A｜原契約項目…）。請確認是「變更預算明細表」；新版型請依 skill 的 docs/FORMATS.md 流程處理，不要手抄數字。');
+  if(!pick){
+    const e=new Error('所有工作表都偵測不到已知版型（甲乙丙丁戊、A.~E.、甲、~戊、A｜原契約項目… 或 B欄 甲、~丁、）。');
+    e.code='NO_LAYOUT';e.sheets=wb.SheetNames.slice();throw e;
+  }
   const budget=parseGridBudget(pick.grid.vals,pick.name);
   if(isXlsx){budget.formulaInfo=true;annotateManual(budget,pick.grid.kinds);annotateConsts(budget,pick.grid.forms)}
   const parsed={mode:'budget',budget,S:summarize(budget)};
@@ -669,15 +742,20 @@ function onFile(e){
   const file=e.target.files[0];if(!file)return;
   document.getElementById('info').style.display='block';
   document.getElementById('info').textContent='✓ '+file.name;
-  document.getElementById('err').style.display='none';
+  document.getElementById('err').style.display='none';hideHelp();
   const reader=new FileReader();
   reader.onload=function(ev){
     try{
       const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'});
       const isXlsx=/\.xlsx$/i.test(file.name);
+      if(fmt==='template'&&!TPL_SHEETS.some(n=>wb.Sheets[n])){showHelp(helpNoTemplate(wb.SheetNames));return}
       res=fmt==='template'?parseTemplate(wb):parseEstimate(wb,isXlsx);
       render();
-    }catch(err){showErr('解析失敗：'+err.message);console.error(err)}
+    }catch(err){
+      if(err.code==='NO_LAYOUT')showHelp(helpNoLayout(err.sheets));
+      else showErr('解析失敗：'+err.message);
+      console.error(err);
+    }
   };
   reader.readAsArrayBuffer(file);
 }
