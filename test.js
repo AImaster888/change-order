@@ -76,8 +76,30 @@ eq('(三)新增合計（議價50000+不議價20000，退回逐項加總）', S.n
 eq('(四)變更項目總合', S.sec4, 94000);
 eq('(五)包工費以外 012+013+014', S.sec5, 5850);
 eq('(六)變更總金額(未稅)', S.sec6, 99850);
-eq('(七)0B營業稅', S.sec7, 4993);
-eq('(八)最終變更金額(含稅)', S.sec8, 104843);
+// DECISIONS #43（2026-11-05）：(七)＝(六)×5% 往下取整，不引用表列——99,850×5%＝4,992.5 → 4,992（表列 4,993 四捨五入）
+eq('(七)0B營業稅＝(六)×5% 往下取整', S.sec7, 4992);
+eq('(七)表列值保留供比對', S.sec7Sheet, 4993);
+eq('(八)最終變更金額(含稅)', S.sec8, 104842);
+// DECISIONS #41：(六) 已是整數 → 012 不調整
+eq('(六)整數時 012 不調整', S.d012Adjusted, false);
+const chainL = e.report.groups.find(g => g.title.startsWith('(四)~(八)')).lines;
+eq('(七)句後紅字附表列值與算式',
+  chainL.some(l => l.startsWith('(七)') && l.includes('預算書 0B 為 4,993，(六)99,850×5%＝4,992.50，營業稅取整數 4,992（追加取 5% 以內）')), true);
+
+// DECISIONS #41：012 帶未取位小數 → (六) 往下取整，差額由 012 收掉並紅字附原值
+const wb41 = XLSX.readFile(fixture);
+for (const sn of wb41.SheetNames) {
+  const ws = wb41.Sheets[sn], rg = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = rg.s.r; r <= rg.e.r; r++) {
+    const c = ws[XLSX.utils.encode_cell({r, c: 1})];
+    if (c && c.v === '012') { const a = XLSX.utils.encode_cell({r, c: 13}); ws[a] = {t: 'n', v: 3900.4567}; }
+  }
+}
+const S41 = P.parseEstimate(wb41, false).S;
+eq('#41 (六)往下取整數', S41.sec6, 99850);
+eq('#41 012 收掉差額', S41.d012Adjusted && S41.d012Sheet === 3900.4567 && S41.d012 === 3900, true);
+eq('#41 (五)依調整後 012 重加', S41.sec5, 5850);
+eq('#41 提醒附預算書原值', S41.warn.some(w => w.startsWith('012 由預算書 3,900.4567 調整為 3,900')), true);
 
 const g1 = e.report.groups[0].lines;
 eq('追加句（v5 句型：單位＋元）', g1[0],
